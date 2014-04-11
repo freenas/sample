@@ -1,7 +1,4 @@
-KMOD=sample_driver
+SUBDIR=	driver test
 
-SRCS= sample_driver.c
+.include <bsd.subdir.mk>
 
-SRCS+= sample_support_${MACHINE_CPUARCH}.c
-
-.include <bsd.kmod.mk>
