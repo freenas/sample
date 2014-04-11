@@ -1,4 +1,4 @@
-CC=	clang
+CC=	clang	# for blocks
 PROG=	sample
 SRCS=	Hash.c Proc.c Thread.c main.c Tree.c \
 	Stack.c Symbol.c SymbolGroup.c
