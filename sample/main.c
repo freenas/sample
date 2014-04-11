@@ -21,30 +21,10 @@
 #include "Tree.h"
 #include "Symbol.h"
 
-#ifndef KERN_PROC_PROFILE
-# define KERN_PROC_PROFILE       42      /* get stack dumps for kernel and user */
-#endif
+#include "sample.h"
 
 int debug = 0;
 int verbose = 0;
-
-static int
-sampling_start(int ms)
-{
-        return syscall(545, ms);
-}
-
-static int
-sampling_stop(void)
-{
-        return syscall(546);
-}
-
-static int
-sampling_read(void *buffer, size_t buffer_size)
-{
-        return __syscall(547, buffer, buffer_size);
-}
 
 static int
 iterate_procs(kvm_t *kvm, void (^handler)(struct kinfo_proc *))
@@ -65,6 +45,27 @@ iterate_procs(kvm_t *kvm, void (^handler)(struct kinfo_proc *))
 }
 
 static const char *
+GetProcName(pid_t pid)
+{
+	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+	struct kinfo_proc ki;
+	char procname[MAXPATHLEN + 1] = { 0 };
+	int rv;
+	size_t size = sizeof(ki);
+
+	rv = sysctl(mib, 4, &ki, &size, NULL, 0);
+	if (rv != -1) {
+		if (ki.ki_comm[0]) {
+			return strdup(ki.ki_comm);
+		} else {
+		}
+	} else {
+		warn("sysctl KERN_PROC_PID pid %u", pid);
+	}
+	return NULL;
+}
+
+static const char *
 GetProcessPathname(pid_t pid)
 {
 	int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, pid };
@@ -82,15 +83,11 @@ GetProcessPathname(pid_t pid)
 
 static uint8_t profile_buffer[128 * 1024];	// 128k should be enough
 static void
-CollectSampleInformation(SampleProc_t *proc)
+AddSampleInformation(SampleProc_t *proc, kern_sample_t *sample)
 {
-	size_t profile_size = sizeof(profile_buffer);
 	int rv;
-	int stack_mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PROFILE, proc->pid };
-
-	if (proc->pid == getpid()) {
-		return;	// Can't trace ourselves?
-	}
+	Stack_t *stack;
+	SampleThread_t *thread;
 
 #if 0
 	if (proc->pathname == NULL) {
@@ -103,20 +100,10 @@ CollectSampleInformation(SampleProc_t *proc)
 		ProcessGetVMMaps(proc);
 	}
 
-	rv = sysctl(stack_mib, 4, profile_buffer, &profile_size, NULL, 0);
-	if (rv != -1) {
-		struct kinfo_sample *cur = (void*)profile_buffer,
-			*end = (void*)(profile_buffer + profile_size);
-		while (cur < end) {
-			Stack_t *stack;
-			SampleThread_t *thread = GetThread(proc, cur->kkpr_tid);
-			size_t size = sizeof(struct kinfo_sample) + cur->kkpr_depth * sizeof(caddr_t);
-			stack = CreateStack(cur);
-			if (stack) {
-				ThreadAddStack(thread, stack);
-			}
-			cur = (void*)(((uint8_t*)cur) + size);
-		}
+	thread = GetThread(proc, sample->tid);
+	stack = CreateStack(sample);
+	if (stack) {
+		ThreadAddStack(thread, stack);
 	}
 }
 
@@ -130,10 +117,13 @@ usage(void)
 int
 main(int ac, char **av)
 {
-	kvm_t *kvm;
+	static const char *kSamplePath = "/dev/sample";
+	ssize_t nread;
+	int sample_fd;
 	int num_syms;
 	hash_t ProcHash;
 	int i;
+	struct ksample_opts opts = { 0 };
 	struct timespec dur = { 0 };
 	uint8_t *sample_buffer = NULL;
 	uint32_t sample_duration = 10;	// in ms
@@ -152,6 +142,12 @@ main(int ac, char **av)
 			break;
 		case 's':
 			sample_duration = atoi(optarg);
+			if (sample_duration > 1000) {
+				errx(1, "sample duration must be less than 1 second (1000 milliseconds)");
+			}
+			if (sample_duration < 1) {
+				errx(1, "sample duration must be at least 1 millisecond");
+			}
 			break;
 		case 'p':
 			target = atoi(optarg);
@@ -166,83 +162,54 @@ main(int ac, char **av)
 			usage();
 		}
 	}
-
-//	if (target == 0) {
-		kvm = kvm_open(NULL, NULL, NULL, O_RDONLY, NULL);
-		if (kvm == NULL) {
-			err(1, "could not create kvm");
-		}
-//	}
+	
+	sample_fd = open(kSamplePath, O_RDONLY);
+	if (sample_fd == -1) {
+		err(1, "Could not open sample device");
+	}
 
 	ProcHash = CreateProcessHash();
+	
+	sample_buffer = malloc(kSampleBufferSize);
+	if (sample_buffer == NULL) {
+		err(1, "Could not allocate sample buffer");
+	}
 
-	dur.tv_sec = (sample_duration / 1000);
-	dur.tv_nsec = (sample_duration % 1000) * 1000000;
+	opts.milliseconds = sample_duration;
+	opts.count = sample_count;
 
-	sample_buffer = malloc(kSampleBufferSize);	// hack, should be configurable
+	if (ioctl(sample_fd, KSIOC_START, &opts) == -1) {
+		err(1, "Could not start sampling");
+	}
 
-	if (sample_buffer)
-		(void)sampling_start(sample_duration);
+	while ((nread = read(sample_fd, sample_buffer, kSampleBufferSize)) > 0) {
+		uint8_t *ptr = sample_buffer,
+			*end = ptr + nread;
 
-	for (i = 0;
-	     i < sample_count;
-	     i++) {
-		int num_samples;
-
-		void (^handler)(struct kinfo_proc *proc) = ^(struct kinfo_proc *proc) {
+		while (ptr < end) {
+			kern_sample_t *samp = (void*)ptr;
 			SampleProc_t *p;
-			if (target && proc->ki_pid != target)
-				return;
-			p = FindProcess(ProcHash, proc->ki_pid);
-			if (p == NULL) {
-				const char *pathname = GetProcessPathname(proc->ki_pid);
-				p = AddProcess(ProcHash, proc->ki_pid);
-				p->pathname = pathname;
-				p->name = strdup(proc->ki_comm);
-			} else {
-			}
-			p->num_samples++;
-			CollectSampleInformation(p);
-		};
-		fprintf(stderr, "whee\n");
-		if (iterate_procs(kvm, handler) == -1) {
-			err(1, "iterate_procs");
-		}
-		
-		if ((num_samples = sampling_read(sample_buffer, kSampleBufferSize)) > 0) {
-			kern_sample_t *cur_sample = (void*)sample_buffer;
-			int indx;
-
-			fprintf(stderr, "Got %u kernel samples\n", num_samples);
-
-			for (indx = 0; indx < num_samples; indx++) {
-				uint8_t *ptr = (void*)cur_sample;
-				SampleProc_t *p;
-				p = FindProcess(ProcHash, cur_sample->pid);
-				if (p != NULL) {
-					SampleThread_t *thread = GetThread(p, cur_sample->tid);
-					if (thread) {
-						Stack_t *stack = CreateStackFromSample(cur_sample);
-						if (stack) {
-							ThreadAddStack(thread, stack);
-						}
-					}
+			if (target == 0 || samp->pid == target) {
+				p = FindProcess(ProcHash, samp->pid);
+				if (p == NULL) {
+					const char *pathname = GetProcessPathname(samp->pid);
+					p = AddProcess(ProcHash, samp->pid);
+					p->pathname = pathname;
+					p->name = GetProcName(samp->pid);
 				}
-				ptr += sizeof(kern_sample_t) + sizeof(caddr_t) * cur_sample->num_pcs;
-				cur_sample = (void*)ptr;
+				p->num_samples++;
+				AddSampleInformation(p, samp);
 			}
-		}
-
-		if (nanosleep(&dur, NULL) != 0) {
-			warn("nanosleep interrupted, breaking");
-			break;
+			ptr += SAMPLE_SIZE(samp);
 		}
 	}
 
-	if (sample_buffer) {
-		sampling_stop();
-		free(sample_buffer);
+	if (ioctl(sample_fd, KSIOC_STOP, 0) == -1) {
+		warn("Could not stop sampling");
 	}
+	close(sample_fd);
+
+	free(sample_buffer);
 
 	SymbolPool_t kernelPool = CreateSymbolPool();
         if (kernelPool) {
@@ -382,7 +349,6 @@ main(int ac, char **av)
 			printf("\n");
 			return 1;
 		});
-	kvm_close(kvm);
 	DestroyHash(ProcHash);
 
 	return 0;

@@ -5,6 +5,7 @@ SRCS=	Hash.c Proc.c Thread.c main.c Tree.c \
 MAN=
 LOCALLIB=	/usr/local/lib
 
+CFLAGS+=	-I${.CURDIR}/../driver
 CFLAGS+=	-fblocks -g -O0 -I/usr/local/include
 LDFLAGS+=	-L${LOCALLIB}
 
