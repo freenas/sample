@@ -182,9 +182,30 @@ main(int ac, char **av)
 		err(1, "Could not start sampling");
 	}
 
-	while ((nread = read(sample_fd, sample_buffer, kSampleBufferSize)) > 0) {
-		uint8_t *ptr = sample_buffer,
-			*end = ptr + nread;
+	do {
+		uint8_t *ptr = sample_buffer, *end;
+		nread = read(sample_fd, sample_buffer, kSampleBufferSize);
+		if (nread == 0) {
+			ssize_t tmp_nread;
+			struct timespec dur = { .tv_sec = 0, .tv_nsec = sample_duration * 1000000 };
+			// We may have more to get, so try sleeping for the sample duration
+			if (nanosleep(&dur, NULL) != 0) {
+				warn("nanosleep interrupted, stopping sampling");
+				break;
+			}
+			tmp_nread = read(sample_fd, sample_buffer, kSampleBufferSize);
+			if (tmp_nread != 0) {
+				nread = tmp_nread;
+			} else {
+				break;
+			}
+		}
+		if (nread == -1) {
+			err(1, "Could not read from sample device");
+		}
+		end = ptr + nread;
+
+		fprintf(stderr, "%s(%d):  read %zd bytes from sampler\n", __FUNCTION__, __LINE__, nread);
 
 		while (ptr < end) {
 			kern_sample_t *samp = (void*)ptr;
@@ -202,7 +223,7 @@ main(int ac, char **av)
 			}
 			ptr += SAMPLE_SIZE(samp);
 		}
-	}
+	} while (1);
 
 	if (ioctl(sample_fd, KSIOC_STOP, 0) == -1) {
 		warn("Could not stop sampling");

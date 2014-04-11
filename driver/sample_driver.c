@@ -548,12 +548,32 @@ static int
 sample_read(struct cdev *dev, struct uio *uio, int ioflag)
 {
 	int error = 0;
-	int unlocked = 0;
 	kern_sample_t *temp_sample = NULL;
+	int samples_left;
+	size_t start = uio->uio_resid;
 
+	/*
+	 * CHECKME
+	 * Is there a better way to do what I want here?
+	 * I'm using start and samples_left to see if we want
+	 * to exit the loop in the caller.  I don't want to wait
+	 * to fill up the buffer, but if all of the currently-recorded
+	 * samples have been gotten, I want to return from read().
+	 * If there are no samples left, I always want to return either
+	 * 0 or however many have been read.
+	 * If there are samples left, and O_NONBLOCK has not been given,
+	 * then I want to wait until there are some more samples.
+	 * If there are samples left, and O_NONBLOCK has been given, then
+	 * read should return 0.
+	 *
+	 * So how would the caller distinguish between no samples left,
+	 * and no samples currently available?
+	 */
 //	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+
 start_over:
 	mtx_lock(&sample_lock);
+	samples_left = 0;
 //	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
 	if (is_open == 0) {
 		error = EBADF;
@@ -580,7 +600,6 @@ start_over:
 		int cpu_index = 0;
 		int got_sample = 0;
 		int error;
-		int samples_left = 0;
 
 		/*
 		 * Get one sample at a time from each queue.
@@ -592,24 +611,22 @@ start_over:
 			kern_sample_set_t *cur_set = kern_samples->cpu_sample_sets[cpu_index];
 			
 			mtx_lock_spin(&cur_set->sample_spin);
-//			uprintf("%s(%d):  calling get_sample with %zu left\n", __FUNCTION__, __LINE__, MIN(STAGING_BUFFER_SIZE, uio->uio_resid));
 			error = get_sample(cur_set, temp_sample, MIN(STAGING_BUFFER_SIZE, uio->uio_resid));
 			mtx_unlock_spin(&cur_set->sample_spin);
 			if (error == ENOENT) {
-//				uprintf("%s(%d):  no samples on cpu %d\n", __FUNCTION__, __LINE__, cpu_index);
 				// Empty, so not really an error.
 				error = 0;
 			} else if (error == 0) {
 				size_t sample_size;
 
 				sample_size = sizeof(kern_sample_t) + sizeof(caddr_t) * temp_sample->num_pcs;
-//				uprintf("%s(%d):  sample_size = %zd\n", __FUNCTION__, __LINE__, sample_size);
 				error = uiomove(temp_sample, sample_size, uio);
 				if (error == 0)
 					got_sample = 1;
 			}
 			if (error == ENOSPC) {
 				// Not enough space to put into the buffer, so let's break out now
+				// Note that this could cause the user-process to loop.
 				error = 0;
 				goto done;
 			} else if (error != 0) {
@@ -630,26 +647,19 @@ start_over:
 #if SAMPLE_DEBUG > 1
 			printf("%s(%d):  No samples this round, ioflag = %#x, samples_left = %d\n", __FUNCTION__, __LINE__, ioflag, samples_left);
 #endif
-			if ((ioflag & O_NONBLOCK) == 0 && samples_left != 0) {
-				// We want to wait until we do have data, so...
-				mtx_unlock(&sample_lock);
-#if SAMPLE_DEBUG > 1
-				printf("%s(%d):  We have %d samples left, so waiting for a bit\n", __FUNCTION__, __LINE__, samples_left);
-#endif
-				error = tsleep(&sample_data_ready, PCATCH, "kern.sample.read", 0);
-				if (error == 0) {
-					goto start_over;
-				} else {
-					unlocked = 1;
-				}
-			}
 			break;
 		}
-				
 	}
 done:
-	if (!unlocked)
-		mtx_unlock(&sample_lock);
+	mtx_unlock(&sample_lock);
+	if (uio->uio_resid == start // Means we had no samples read
+	    && samples_left != 0 &&
+	    ((ioflag & O_NONBLOCK) == 0)) {
+		error = tsleep(&sample_data_ready, PCATCH, "kern.sample.read", 0);
+		if (error == 0) {
+			goto start_over;
+		}
+	}
 	if (temp_sample) {
 //		uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
 		free(temp_sample, M_TEMP);
