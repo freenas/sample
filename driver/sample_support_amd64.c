@@ -130,8 +130,8 @@ stack_capture_user(struct thread *thread)
                 uio.uio_td = curthread;
                 error = proc_rwmem(thread->td_proc, &uio);
                 if (error) {
-                        printf("%s(%d):  error = %d\n", __FUNCTION__, __LINE__, error);
-                        break;
+//			printf("%s(%d):  error = %d\n", __FUNCTION__, __LINE__, error);
+			break;
                 }
                 pcs[depth++] = (caddr_t)frame.f_retaddr;
 //              printf("%s(%d):  frame.f_frame = %x\n", __FUNCTION__, __LINE__, (unsigned int)frame.f_frame);
