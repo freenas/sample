@@ -10,6 +10,7 @@
 
 struct ksample_opts {
 	int	milliseconds;	// may be more later
+	int	count;	// How many samples to use
 };
 
 typedef struct {

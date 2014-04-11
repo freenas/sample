@@ -89,6 +89,7 @@ stack_capture_kernel(struct thread *thread)
                 retval->depth = depth;
                 bcopy(pcs, retval->pcs, depth * sizeof(pcs[0]));
         }
+//	printf("%s(%d)\n", __FUNCTION__, __LINE__);
         free(pcs, M_TEMP);
         return retval;
 }
@@ -141,6 +142,7 @@ stack_capture_user(struct thread *thread)
                 retval->depth = depth;
                 bcopy(pcs, retval->pcs, depth * sizeof(pcs[0]));
         }
+//	printf("%s(%d)\n", __FUNCTION__, __LINE__);
         free(pcs, M_TEMP);
         return retval;
 }
@@ -243,20 +245,27 @@ md_stack_capture_forthread(struct thread *td, caddr_t *pcs, size_t size)
 		bcopy(ustack->pcs, ptr + kernel_size, user_size);
 	}
 	if (kernel_size + user_size) {
-		reverse_stack((void*)ptr, kernel_size + user_size);
+		reverse_stack((void*)ptr, ustack->depth + kstack->depth);
 		bcopy(ptr, pcs, MIN(kernel_size + user_size, size));
 		retval = ustack->depth + kstack->depth;
 		if (retval > size) {
-			uprintf("%s(%d):  Stack for pid %u thread %u got truncated from %zu to %zu\n", __FUNCTION__, __LINE__, td->td_proc->p_pid, td->td_tid, retval, size);
+			printf("%s(%d):  Stack for pid %u thread %u got truncated from %zu to %zu\n", __FUNCTION__, __LINE__, td->td_proc->p_pid, td->td_tid, retval, size);
 			retval = size;
 		}
 	}
 done:
-	if (ustack)
+
+	if (ustack) {
+//		printf("%s(%d)\n", __FUNCTION__, __LINE__);
 		free(ustack, M_TEMP);
-	if (kstack)
+	}
+	if (kstack) {
+//		printf("%s(%d)\n", __FUNCTION__, __LINE__);
 		free(kstack, M_TEMP);
-	if (ptr)
+	}
+	if (ptr) {
+//		printf("%s(%d)\n", __FUNCTION__, __LINE__);
 		free(ptr, M_TEMP);
+	}
 	return retval;
 }
