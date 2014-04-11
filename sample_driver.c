@@ -5,6 +5,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/conf.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
+#include <sys/sx.h>
 #include <sys/mutex.h>
 #include <sys/smp.h>
 #include <sys/malloc.h>
@@ -106,14 +107,13 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
         size_t sample_size;
 
 	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+
         mtx_lock_spin(&sample_set->sample_spin);
-	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
         head = (uint8_t*)sample_set->head;
         tail = (uint8_t*)sample_set->tail;
 
         if (head == tail) {
                 // No entries                                                                                                
-		uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
                 error = ENOENT;
                 goto done;
         }
@@ -121,7 +121,6 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
         KASSERT((sample_size > sizeof(kern_sample_t)), ("sample size %zu is too small", sample_size));
 
         if (sample_size > buffer_size) {
-		uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
                 error = ENOSPC;
                 goto done;
         }
@@ -130,13 +129,11 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
         end = start + sample_set->sample_size;
 
         if (head < tail) {
-		uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
                 if (sample_size > (tail - head)) {
                         /*                                                                                                   
                          * This should not have happened.  It means the buffer                                               
                          * is corrupt.  I should probably indicate this somehow.                                             
                          */
-			uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
                         error = EINVAL;
                         goto done;
                 }
@@ -145,32 +142,25 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
         }  else {
                 // It wraps, so a bit more complicated                                                                       
                 size_t avail = end - head, amt;
-		uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
 
                 avail += tail - start;
                 if (sample_size > avail) {
-			uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
                         error = EINVAL;
                         goto done;
                 }
                 amt = MIN(sample_size, end - head);
                 bcopy(head, buffer, amt);
                 if (amt == sample_size) {
-			uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
                         head += amt;
                 } else {
-			uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
                         bcopy(start, ((uint8_t*)buffer) + amt, sample_size - amt);
                         head = start + (sample_size - amt);
                 }
         }
-	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
         sample_set->head = (void*)head;
 
 done:
-	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
         mtx_unlock_spin(&sample_set->sample_spin);
-	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
 
         return (error);
 }
@@ -234,7 +224,6 @@ add_sample(kern_sample_set_t *sample_set,
 static void
 sample_cpu_handler(void *arg)
 {
-	printf("%s:  cpu %d\n", __FUNCTION__, curcpu);
         kern_sample_set_t *ctx = arg;
         struct timeval now;
 
@@ -281,10 +270,61 @@ sample_cpu_handler(void *arg)
 	return;
 }
 
+/*
+ * This is to iterate through all the threads, and only
+ * look at threads that are sleeping (that is, not swapped
+ * out, and not running).
+ * 
+ * Unlike the per-cpu one, it will get many sets of samples.
+ */
 static void
 sample_sleeping_handler(void *arg)
 {
-	printf("%s:  cpu %d\n", __FUNCTION__, curcpu);
+	kern_sample_set_t *ctx = arg;
+	struct proc *p;
+
+#if 0
+	register_t t = read_rflags();
+	printf("%s:  cpu %d, rflags = %#lx (interrupt is%s enabled\n", __FUNCTION__, curcpu, t, (t & 0x00000200) ? "":  " NOT");
+#endif
+
+	sx_slock(&allproc_lock);
+	FOREACH_PROC_IN_SYSTEM(p) {
+		struct thread *td;
+
+		PROC_LOCK(p);
+
+		if (p->p_state == PRS_NEW) {
+			PROC_UNLOCK(p);
+			continue;
+		}
+		FOREACH_THREAD_IN_PROC(p, td) {
+			kern_sample_t *samp = (void*)ctx->temp_buffer;
+			size_t depth;
+
+			if (TD_IS_SWAPPED(td) ||
+			    TD_IS_RUNNING(td)) {
+				continue;
+			}
+
+			depth = md_stack_capture_forthread(td, samp->pc, (STAGING_BUFFER_SIZE - offsetof(kern_sample_t, pc)) / sizeof(caddr_t));
+			if (depth > 0) {
+				samp->pid = td->td_proc->p_pid;
+				samp->tid = td->td_tid;
+				getnanouptime(&samp->timestamp);
+				samp->num_pcs = depth;
+				add_sample(ctx, samp, sizeof(*samp) + sizeof(caddr_t) * depth);
+			}
+		}
+		PROC_UNLOCK(p);
+	}
+	sx_sunlock(&allproc_lock);
+#ifdef C_DIRECT_EXEC
+        callout_reset_sbt_on(&ctx->sample_callout, 0, 1, sample_handler, arg, PCPU_GET(cpuid), C_DIRECT_EXEC);
+#else
+	int ticks_ms = tvtohz(&ctx->sample_ms);
+	callout_reset_on(&ctx->sample_callout, ticks_ms, sample_cpu_handler, ctx, PCPU_GET(cpuid));
+#endif
 	return;
 }
 
@@ -494,12 +534,14 @@ start_over:
 		int error;
 
 		for (cpu_index = 0;
-		     cpu_index <= kern_samples->s_ncpu;
+		     cpu_index < kern_samples->s_ncpu;
 		     cpu_index++) {
 			kern_sample_set_t *cur_set = kern_samples->cpu_sample_sets[cpu_index];
 			
+			uprintf("%s(%d):  calling get_sample with %zu left\n", __FUNCTION__, __LINE__, MIN(STAGING_BUFFER_SIZE, uio->uio_resid));
 			error = get_sample(cur_set, temp_sample, MIN(STAGING_BUFFER_SIZE, uio->uio_resid));
 			if (error == ENOENT) {
+				uprintf("%s(%d):  no samples on cpu %d\n", __FUNCTION__, __LINE__, cpu_index);
 				// Empty, so not really an error... just continue
 				error = 0;
 				continue;
@@ -507,9 +549,11 @@ start_over:
 				size_t sample_size;
 
 				sample_size = sizeof(kern_sample_t) + sizeof(caddr_t) * temp_sample->num_pcs;
+				uprintf("%s(%d):  sample_size = %zd\n", __FUNCTION__, __LINE__, sample_size);
 				error = uiomove(temp_sample, sample_size, uio);
 			}
 			if (error != 0) {
+				uprintf("%s(%d):  error = %d\n", __FUNCTION__, __LINE__, error);
 				goto done;
 			}
 			got_sample = 1;
@@ -522,6 +566,7 @@ start_over:
 				tsleep(&sample_data_ready, 0, "kern.sample.read", 0);
 				goto start_over;
 			}
+			break;
 		}
 				
 	}
