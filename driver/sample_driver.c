@@ -18,10 +18,11 @@ __FBSDID("$FreeBSD$");
 #include <sys/proc.h>
 
 #include <machine/cpu.h>
+#include <machine/atomic.h>
 
 #include "sample.h"
 
-#define SAMPLE_DEBUG 0
+#define SAMPLE_DEBUG 1
 
 #define KERN_SAMPLE_MAX_STACK   256     // 256 levels deep seems enough for now                                              
 
@@ -30,7 +31,7 @@ __FBSDID("$FreeBSD$");
 typedef struct {
         struct mtx sample_spin; // Spin lock                                                                                 
         size_t  sample_size;    // Total size of buffer                                                                      
-	size_t	sample_count;	// How many to do -- counts down to 0
+	int32_t	sample_count;	// How many to do -- counts down to 0
         struct timeval next_time;
         struct timeval sample_ms;      // Milliseconds between samples                                                      
         struct callout  sample_callout;
@@ -231,10 +232,9 @@ sample_cpu_handler(void *arg)
         kern_sample_set_t *ctx = arg;
         struct timeval now;
 
-#if SAMPLE_DEBUG > 2
-        if (PCPU_GET(cpuid) == 0) {
-                printf("%s(%p):  CPU %u, ctx->head = %p, ctx->tail = %p, ctx->sample_size = %zu\n", __FUNCTION__, arg, PCPU_GET(cpuid), ctx->head, ctx->tail, ctx->sample_size);
-        }
+#if SAMPLE_DEBUG > 1
+	printf("%s(%p):  CPU %u, ctx->head = %p, ctx->tail = %p, ctx->sample_size = %zu\n", __FUNCTION__, arg, PCPU_GET(cpuid), ctx->head, ctx->tail, ctx->sample_size);
+
 #endif
         /*                                                                                                                   
          * Since I'm not sure how often we actually get called, let's                                                        
@@ -242,8 +242,6 @@ sample_cpu_handler(void *arg)
          */
         getmicrouptime(&now);
         if (timevalcmp(&now, &ctx->next_time, >=)) {
-                int is_kernel = !TRAPF_USERMODE(curthread->td_frame);
-                int intr_kernel = curthread->td_intr_frame ? !TRAPF_USERMODE(curthread->td_intr_frame) : 0;
                 kern_sample_t *samp = ctx->temp_buffer;
 
                 /*                                                                                                           
@@ -254,17 +252,30 @@ sample_cpu_handler(void *arg)
 
                 samp->pid = curthread->td_proc->p_pid;
                 samp->tid = curthread->td_tid;
-                samp->is_kernel = is_kernel;
-                samp->pcb_null = curthread->td_pcb == NULL;
-                samp->thread_state = curthread->td_state;
-                samp->intr_kernel = intr_kernel;
-                samp->num_pcs = 0;
+		samp->cpuid = PCPU_GET(cpuid);
+		samp->sample_type = SAMPLE_TYPE_RUNNING;
+#if SAMPLE_DEBUG > 2
+		printf("%s(%d):  sampe = {pid %u, tid %u, cpuid %d, type %d}\n", __FUNCTION__, __LINE__, samp->pid, samp->tid, samp->cpuid, samp->sample_type);
+#endif
                 getnanouptime(&samp->timestamp);
                 samp->num_pcs = md_stack_capture_curthread(samp->pc, (STAGING_BUFFER_SIZE - offsetof(kern_sample_t, pc)) / sizeof(caddr_t));
-                add_sample(ctx, samp, sizeof(*samp) + sizeof(caddr_t) * samp->num_pcs);
+		if (samp->num_pcs > 0) {
+			add_sample(ctx, samp, sizeof(*samp) + sizeof(caddr_t) * samp->num_pcs);
+		} else {
+#if SAMPLE_DEBUG > 1
+			printf("%s(%d):  Sample for <pid %u, tid %u> on cpu %d was empty\n", __FUNCTION__, __LINE__, samp->pid, samp->tid, samp->cpuid);
+#endif
+		}
         }
 	wakeup(&sample_data_ready);
+
+	mtx_lock_spin(&ctx->sample_spin);
 	if (ctx->sample_count-- > 1) {
+#if SAMPLE_DEBUG > 1
+		struct timespec now;
+		getnanouptime(&now);
+		printf("%s(%d):  CPU %d, sample_count = %u, now = <%lu, %lu>\n", __FUNCTION__, __LINE__, PCPU_GET(cpuid), ctx->sample_count, now.tv_sec, now.tv_nsec);
+#endif
 #ifdef C_DIRECT_EXEC
 		callout_reset_sbt_on(&ctx->sample_callout, tvtosbt(ctx->sample_ms), 1,
 				     sample_cpu_handler, arg, PCPU_GET(cpuid), C_DIRECT_EXEC);
@@ -273,6 +284,7 @@ sample_cpu_handler(void *arg)
 		callout_reset_on(&ctx->sample_callout, ticks_ms, sample_cpu_handler, ctx, PCPU_GET(cpuid));
 #endif
 	}
+	mtx_unlock_spin(&ctx->sample_spin);
 	return;
 }
 
@@ -320,9 +332,14 @@ sample_sleeping_handler(void *arg)
 			if (depth > 0) {
 				samp->pid = td->td_proc->p_pid;
 				samp->tid = td->td_tid;
+				samp->cpuid = td->td_oncpu;
+				samp->sample_type = SAMPLE_TYPE_SLEEPING;
 				getnanouptime(&samp->timestamp);
 				samp->num_pcs = depth;
-				uprintf("%s(%d):  sample size = %zu\n", __FUNCTION__, __LINE__, sizeof(*samp) + sizeof(caddr_t) * depth);
+#if SAMPLE_DEBUG > 2
+				printf("%s(%d):  sampe = {pid %u, tid %u, cpuid %d, type %d}\n", __FUNCTION__, __LINE__, samp->pid, samp->tid, samp->cpuid, samp->sample_type);
+				printf("%s(%d):  sample size = %zu\n", __FUNCTION__, __LINE__, sizeof(*samp) + sizeof(caddr_t) * depth);
+#endif
 				add_sample(ctx, samp, sizeof(*samp) + sizeof(caddr_t) * depth);
 			}
 		}
@@ -330,6 +347,7 @@ sample_sleeping_handler(void *arg)
 	}
 	sx_sunlock(&allproc_lock);
 	wakeup(&sample_data_ready);
+	mtx_lock_spin(&ctx->sample_spin);
 	if (ctx->sample_count-- > 1) {
 #ifdef C_DIRECT_EXEC
 		callout_reset_sbt_on(&ctx->sample_callout, tvtosbt(ctx->sample_ms), 1,
@@ -339,6 +357,7 @@ sample_sleeping_handler(void *arg)
 		callout_reset_on(&ctx->sample_callout, ticks_ms, sample_sleeping_handler, ctx, PCPU_GET(cpuid));
 #endif
 	}
+	mtx_unlock_spin(&ctx->sample_spin);
 	return;
 }
 
@@ -442,6 +461,10 @@ sample_ioctl(struct cdev *dev,
 				retval = EINVAL;
 				goto done;
 			}
+
+#if SAMPLE_DEBUG
+			printf("start_sampling:  opts = <%u, %u>\n", opts->milliseconds, opts->count);
+#endif
 
 			sample_ms.tv_usec = opts->milliseconds * 1000;	// 1ms = 1000 usecs
 
@@ -559,24 +582,31 @@ start_over:
 		int error;
 		int samples_left = 0;
 
+		/*
+		 * Get one sample at a time from each queue.
+		 * That includes the per-CPU queues, and the queue for non-running threads.
+		 */
 		for (cpu_index = 0;
 		     cpu_index < kern_samples->s_ncpu;
 		     cpu_index++) {
 			kern_sample_set_t *cur_set = kern_samples->cpu_sample_sets[cpu_index];
 			
+			mtx_lock_spin(&cur_set->sample_spin);
 //			uprintf("%s(%d):  calling get_sample with %zu left\n", __FUNCTION__, __LINE__, MIN(STAGING_BUFFER_SIZE, uio->uio_resid));
 			error = get_sample(cur_set, temp_sample, MIN(STAGING_BUFFER_SIZE, uio->uio_resid));
+			mtx_unlock_spin(&cur_set->sample_spin);
 			if (error == ENOENT) {
 //				uprintf("%s(%d):  no samples on cpu %d\n", __FUNCTION__, __LINE__, cpu_index);
-				// Empty, so not really an error... just continue
+				// Empty, so not really an error.
 				error = 0;
-				continue;
 			} else if (error == 0) {
 				size_t sample_size;
 
 				sample_size = sizeof(kern_sample_t) + sizeof(caddr_t) * temp_sample->num_pcs;
 //				uprintf("%s(%d):  sample_size = %zd\n", __FUNCTION__, __LINE__, sample_size);
 				error = uiomove(temp_sample, sample_size, uio);
+				if (error == 0)
+					got_sample = 1;
 			}
 			if (error == ENOSPC) {
 				// Not enough space to put into the buffer, so let's break out now
@@ -586,17 +616,26 @@ start_over:
 				uprintf("%s(%d):  error = %d\n", __FUNCTION__, __LINE__, error);
 				goto done;
 			}
-			if (cur_set->sample_count >= 1)
-				samples_left = 0;
-			else
-				samples_left = 1;
-			got_sample = 1;
+			mtx_lock_spin(&cur_set->sample_spin);
+			if (cur_set->sample_count > 1) {
+				samples_left += cur_set->sample_count;
+			}
+			mtx_unlock_spin(&cur_set->sample_spin);
 		}
+#if SAMPLE_DEBUG > 1
+		printf("%s(%d):  got_sample = %d, samples_left = %d\n", __FUNCTION__, __LINE__, got_sample, samples_left);
+#endif
 		if (got_sample == 0) {
 			// We had no data and no errors
-			if ((ioflag & O_NONBLOCK) == 0 && samples_left == 1) {
+#if SAMPLE_DEBUG > 1
+			printf("%s(%d):  No samples this round, ioflag = %#x, samples_left = %d\n", __FUNCTION__, __LINE__, ioflag, samples_left);
+#endif
+			if ((ioflag & O_NONBLOCK) == 0 && samples_left != 0) {
 				// We want to wait until we do have data, so...
 				mtx_unlock(&sample_lock);
+#if SAMPLE_DEBUG > 1
+				printf("%s(%d):  We have %d samples left, so waiting for a bit\n", __FUNCTION__, __LINE__, samples_left);
+#endif
 				error = tsleep(&sample_data_ready, PCATCH, "kern.sample.read", 0);
 				if (error == 0) {
 					goto start_over;

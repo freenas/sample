@@ -163,8 +163,18 @@ md_stack_capture_curthread(caddr_t *pcs, size_t size)
         struct trapframe *tf = curthread->td_intr_frame;
         size_t num_kstacks = 0, num_ustacks = 0;
 
-        if (tf == NULL)
-                return 0;
+//	printf("%s(%d):  curthread pid %u, tid %u, name %s\n", __FUNCTION__, __LINE__, curthread->td_proc->p_pid, curthread->td_tid, curthread->td_name);
+
+        if (tf == NULL) {
+//		printf("%s(%d):  intr frame is NULL?\n", __FUNCTION__, __LINE__);
+//		tf = curthread->td_frame;
+		/*
+		 * I'm not sure what this means.  This should be done via interrupt,
+		 * so if curthread wasn't interrupted, then I don't think we can get
+		 * anything here?  Please tell me what I'm doing wrong.
+		 */
+		return 0;
+	}
 
         if (!TRAPF_USERMODE(tf)) {
                 // Start with kernel mode                                                                                    
