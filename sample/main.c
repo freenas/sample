@@ -205,8 +205,6 @@ main(int ac, char **av)
 		}
 		end = ptr + nread;
 
-		fprintf(stderr, "%s(%d):  read %zd bytes from sampler\n", __FUNCTION__, __LINE__, nread);
-
 		while (ptr < end) {
 			kern_sample_t *samp = (void*)ptr;
 			SampleProc_t *p;
