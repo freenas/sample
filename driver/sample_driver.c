@@ -24,18 +24,18 @@ __FBSDID("$FreeBSD$");
 
 #define SAMPLE_DEBUG 1
 
-#define KERN_SAMPLE_MAX_STACK   256     // 256 levels deep seems enough for now                                              
+#define KERN_SAMPLE_MAX_STACK   256     // 256 levels deep seems enough for now
 
-#define STAGING_BUFFER_SIZE     (8 * 1024)      // 8Kbytes for temporary stack                                               
+#define STAGING_BUFFER_SIZE     (8 * 1024)      // 8Kbytes for temporary stack
 
 typedef struct {
-        struct mtx sample_spin; // Spin lock                                                                                 
-        size_t  sample_size;    // Total size of buffer                                                                      
+        struct mtx sample_spin; // Spin lock
+        size_t  sample_size;    // Total size of buffer
 	int32_t	sample_count;	// How many to do -- counts down to 0
         struct timeval next_time;
-        struct timeval sample_ms;      // Milliseconds between samples                                                      
+        struct timeval sample_ms;      // Milliseconds between samples
         struct callout  sample_callout;
-        void    *temp_buffer;   // Staging area to get a sample's stacks.                                                    
+        void    *temp_buffer;   // Staging area to get a sample's stacks.
         uint32_t        num_dropped;
         kern_sample_t   *head;
         kern_sample_t   *tail;
@@ -49,7 +49,7 @@ typedef struct {
  */
 
 struct kern_sample_struct {
-        size_t  s_ncpu; // How many CPU slots                                                                              
+        size_t  s_ncpu; // How many CPU slots
         kern_sample_set_t       *cpu_sample_sets[0];
 };
 
@@ -80,19 +80,19 @@ static struct cdevsw sample_cdevsw = {
 	.d_name = "sample"
 };
 
-/*                                                                                                                           
- * Extract a sample from a sample_set.  Since the buffer is a circular                                                       
- * buffer, the value may wrap.  This function may not be called from                                                         
- * the handler (since that is executing in interrupt context).                                                               
- *                                                                                                                           
- * If there are any samples, it will allocate a buffer using malloc (the                                                     
- * caller must free it), and set *sample to that value.  If there are                                                        
- * no samples, *sample will be set to NULL.                                                                                  
- *                                                                                                                           
- * It returns 0 on success, and an errno on error.                                                                           
- *                                                                                                                           
- * Only get_sample modifies sample_set_t->head.                                                                              
- *                                                                                                                           
+/*
+ * Extract a sample from a sample_set.  Since the buffer is a circular
+ * buffer, the value may wrap.  This function may not be called from
+ * the handler (since that is executing in interrupt context).
+ *
+ * If there are any samples, it will allocate a buffer using malloc (the
+ * caller must free it), and set *sample to that value.  If there are
+ * no samples, *sample will be set to NULL.
+ *
+ * It returns 0 on success, and an errno on error.
+ *
+ * Only get_sample modifies sample_set_t->head.
+ *
  */
 static inline size_t
 get_sample_size_from_ring_buffer(kern_sample_set_t *set, kern_sample_t *head)
@@ -117,7 +117,7 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
         tail = (uint8_t*)sample_set->tail;
 
         if (head == tail) {
-                // No entries                                                                                                
+                // No entries
                 error = ENOENT;
                 goto done;
         }
@@ -135,9 +135,9 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
 
         if (head < tail) {
                 if (sample_size > (tail - head)) {
-                        /*                                                                                                   
-                         * This should not have happened.  It means the buffer                                               
-                         * is corrupt.  I should probably indicate this somehow.                                             
+                        /*
+                         * This should not have happened.  It means the buffer
+                         * is corrupt.  I should probably indicate this somehow.
                          */
                         error = EINVAL;
                         goto done;
@@ -145,7 +145,7 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
                 bcopy(head, buffer, sample_size);
                 head += sample_size;
         }  else {
-                // It wraps, so a bit more complicated                                                                       
+                // It wraps, so a bit more complicated
                 size_t avail = end - head, amt;
 
                 avail += tail - start;
@@ -170,15 +170,15 @@ done:
         return (error);
 }
 
-/*                                                                                                                           
- * Add the blob of sample_in to sample_set->samples.                                                                         
- * This is a circular buffer, so the data may wrap.                                                                          
- * If adding the blob would go past sample_set->head,                                                                        
- * then this is a dropped sample, and we increment                                                                           
- * the appropriate field.                                                                                                    
- *                                                                                                                           
- * Only add_sample modifies sample_set->tail, and only                                                                       
- * one caller invokes us.                                                                                                    
+/*
+ * Add the blob of sample_in to sample_set->samples.
+ * This is a circular buffer, so the data may wrap.
+ * If adding the blob would go past sample_set->head,
+ * then this is a dropped sample, and we increment
+ * the appropriate field.
+ *
+ * Only add_sample modifies sample_set->tail, and only
+ * one caller invokes us.
  */
 static void __unused
 add_sample(kern_sample_set_t *sample_set,
@@ -196,7 +196,7 @@ add_sample(kern_sample_set_t *sample_set,
         end = start + sample_set->sample_size;
 
         if (head > tail) {
-                // We don't have to worry about wrapping                                                                     
+                // We don't have to worry about wrapping
                 if (sample_size > (head - tail)) {
                         atomic_add_32(&sample_set->num_dropped, 1);
                 } else {
@@ -204,7 +204,7 @@ add_sample(kern_sample_set_t *sample_set,
                         sample_set->tail = (void*)(tail + sample_size);
                 }
         } else {
-                // We may have to wrap                                                                                       
+                // We may have to wrap
                 size_t avail, amt;
 
                 avail = end - tail;
@@ -236,16 +236,16 @@ sample_cpu_handler(void *arg)
 	printf("%s(%p):  CPU %u, ctx->head = %p, ctx->tail = %p, ctx->sample_size = %zu\n", __FUNCTION__, arg, PCPU_GET(cpuid), ctx->head, ctx->tail, ctx->sample_size);
 
 #endif
-        /*                                                                                                                   
-         * Since I'm not sure how often we actually get called, let's                                                        
-         * check to see if we're past when the next call should be.                                                          
+        /*
+         * Since I'm not sure how often we actually get called, let's
+         * check to see if we're past when the next call should be.
          */
         getmicrouptime(&now);
         if (timevalcmp(&now, &ctx->next_time, >=)) {
                 kern_sample_t *samp = ctx->temp_buffer;
 
-                /*                                                                                                           
-                 * Figure out the next firing time                                                                           
+                /*
+                 * Figure out the next firing time
                  */
                 ctx->next_time = now;
                 timevaladd(&ctx->next_time, &ctx->sample_ms);
@@ -292,7 +292,7 @@ sample_cpu_handler(void *arg)
  * This is to iterate through all the threads, and only
  * look at threads that are sleeping (that is, not swapped
  * out, and not running).
- * 
+ *
  * Unlike the per-cpu one, it will get many sets of samples.
  */
 static void __unused
@@ -542,7 +542,7 @@ done:
 
 /*
  * Read data from the sample queues.
- * 
+ *
  */
 static int
 sample_read(struct cdev *dev, struct uio *uio, int ioflag)

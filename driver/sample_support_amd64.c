@@ -18,6 +18,7 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm.h>
 #include <vm/vm_param.h>
 #include <vm/pmap.h>
+#include <vm/vm_map.h>
 
 #include "sample.h"
 
@@ -148,11 +149,11 @@ stack_capture_user(struct thread *thread)
 }
 
 
-/*                                                                                                                           
+/*
  * Capture the kernel and user stacks for curthread.
  * This is intended to be called from an interrupt
  * context (see kern/kern_sample.c).
- *                                                                                                                           
+ *
  * size is in number of elements, not bytes.  (Caller must
  * ensure this.)
  */
@@ -161,6 +162,8 @@ size_t
 md_stack_capture_curthread(caddr_t *pcs, size_t size)
 {
         struct trapframe *tf = curthread->td_intr_frame;
+	pmap_t pmap = vmspace_pmap(curthread->td_proc->p_vmspace);
+	
         size_t num_kstacks = 0, num_ustacks = 0;
 
 //	printf("%s(%d):  curthread pid %u, tid %u, name %s\n", __FUNCTION__, __LINE__, curthread->td_proc->p_pid, curthread->td_tid, curthread->td_name);
@@ -177,7 +180,7 @@ md_stack_capture_curthread(caddr_t *pcs, size_t size)
 	}
 
         if (!TRAPF_USERMODE(tf)) {
-                // Start with kernel mode                                                                                    
+                // Start with kernel mode
                 unsigned long callpc;
                 struct amd64_frame *frame;
 
@@ -208,7 +211,21 @@ md_stack_capture_curthread(caddr_t *pcs, size_t size)
                 while ((num_kstacks + num_ustacks) < size) {
                         int err;
                         void *bp = frame.f_frame;
-
+			vm_page_t frame_page;
+			
+			/*
+			 * We use pmap_extract_and_hold to get the physical
+			 * pages with the frame on it.  We specifically want
+			 * frame.f_retaddr, and then frame.f_frame for the next
+			 * round.  (These could be on different pages.)
+			 */
+			frame_page = pmap_extract_and_hold(pmap, (vm_offset_t)frame.f_frame, VM_PROT_READ);
+			if (frame_page == NULL) {
+				break;
+			} else {
+				size_t offset = (caddr_t)frame.f_frame - (caddr_t)trunc_page(frame.f_frame);
+			}
+			
                         err = copyin_nofault((void*)frame.f_frame, &frame, sizeof(frame));
                         if (err == 0) {
                                 if (frame.f_retaddr != 0) {
