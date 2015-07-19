@@ -3,6 +3,8 @@
 
 # include <sys/ioccom.h>
 
+# define SAMPLE_DEBUG 1
+
 # define SAMPLE_DEV_FILENAME	"sample"
 
 # define KSIOC_START	_IOW('S', 0, struct ksample_opts)

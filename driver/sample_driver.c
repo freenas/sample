@@ -22,8 +22,6 @@ __FBSDID("$FreeBSD$");
 
 #include "sample.h"
 
-#define SAMPLE_DEBUG 1
-
 #define KERN_SAMPLE_MAX_STACK   256     // 256 levels deep seems enough for now
 
 #define STAGING_BUFFER_SIZE     (8 * 1024)      // 8Kbytes for temporary stack
@@ -99,6 +97,9 @@ get_sample_size_from_ring_buffer(kern_sample_set_t *set, kern_sample_t *head)
 {
 	size_t retval = 0;
 
+#if SAMPLE_DEBUG
+	uprintf("%s(%d):  head->num_pcs = %d\n", __FUNCTION__, __LINE__, head->num_pcs);
+#endif
         retval = sizeof(*head) + sizeof(caddr_t) * head->num_pcs;
         return retval;
 }
@@ -110,7 +111,9 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
         int error = 0;
         size_t sample_size;
 
-//	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+#if SAMPLE_DEBUG > 5
+	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+#endif
 
         mtx_lock_spin(&sample_set->sample_spin);
         head = (uint8_t*)sample_set->head;
@@ -125,7 +128,9 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
         KASSERT((sample_size > sizeof(kern_sample_t)), ("sample size %zu is too small", sample_size));
 
         if (sample_size > buffer_size) {
+#if SAMPLE_DEBUG
 		uprintf("%s(%d):  sample_size = %zu, buffer_size = %zu\n", __FUNCTION__, __LINE__, sample_size, buffer_size);
+#endif
                 error = ENOSPC;
                 goto done;
         }
@@ -260,7 +265,7 @@ sample_cpu_handler(void *arg)
                 getnanouptime(&samp->timestamp);
                 samp->num_pcs = md_stack_capture_curthread(samp->pc, (STAGING_BUFFER_SIZE - offsetof(kern_sample_t, pc)) / sizeof(caddr_t));
 		if (samp->num_pcs > 0) {
-			add_sample(ctx, samp, sizeof(*samp) + sizeof(caddr_t) * samp->num_pcs);
+			add_sample(ctx, samp, get_sample_size_from_ring_buffer(NULL, samp));
 		} else {
 #if SAMPLE_DEBUG > 1
 			printf("%s(%d):  Sample for <pid %u, tid %u> on cpu %d was empty\n", __FUNCTION__, __LINE__, samp->pid, samp->tid, samp->cpuid);
@@ -375,6 +380,9 @@ release_sample_data(void)
 
                         cur_set = kern_samples->cpu_sample_sets[cpu_index];
 			mtx_destroy(&cur_set->sample_spin);
+#if SAMPLE_DEBUG
+			uprintf("%s(%d):  Calling callout_drain now\n", __FUNCTION__, __LINE__);
+#endif
                         callout_drain(&cur_set->sample_callout);
 			if (cur_set->temp_buffer)
 				free(cur_set->temp_buffer, M_SAMPLE);
@@ -389,7 +397,9 @@ sample_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 {
 	int error = 0;
 
+#if SAMPLE_DEBUG
 	uprintf("%s(%p, %#o, %d, %p)\n", __FUNCTION__, dev, oflags, devtype, td);
+#endif
 	mtx_lock(&sample_lock);
 
 	if (is_open != 0) {
@@ -411,7 +421,9 @@ done:
 static int
 sample_close(struct cdev *dev, int fflag, int devtype, struct thread *td)
 {
+#if SAMPLE_DEBUG
 	uprintf("%s(%p, %#o, %d, %p)\n", __FUNCTION__, dev, fflag, devtype, td);
+#endif
 	mtx_lock(&sample_lock);
 	is_open = 0;
 
@@ -488,12 +500,16 @@ sample_ioctl(struct cdev *dev,
 			}
 			if (out_of_mem) {
 				// Blast it, we ran out of memory
-				uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+#if SAMPLE_DEBUG
+				uprintf("%s(%d): out of memory\n", __FUNCTION__, __LINE__);
+#endif
 				for (cpu_index--; cpu_index >= 0; cpu_index--) {
 					free(kern_samples->cpu_sample_sets[cpu_index], M_SAMPLE);
 					kern_samples->cpu_sample_sets[cpu_index] = NULL;
 				}
-//				uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+#if SAMPLE_DEBUG > 2
+				uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+#endif
 
 				free(kern_samples, M_SAMPLE);
 				kern_samples = NULL;
@@ -630,7 +646,9 @@ start_over:
 				error = 0;
 				goto done;
 			} else if (error != 0) {
+#if SAMPLE_DEBUG
 				uprintf("%s(%d):  error = %d\n", __FUNCTION__, __LINE__, error);
+#endif
 				goto done;
 			}
 			mtx_lock_spin(&cur_set->sample_spin);
@@ -657,6 +675,9 @@ done:
 	    ((ioflag & O_NONBLOCK) == 0)) {
 		error = tsleep(&sample_data_ready, PCATCH, "kern.sample.read", 0);
 		if (error == 0) {
+#if SAMPLE_DEBUG > 1
+			uprintf("%s(%d):  starting over\n", __FUNCTION__, __LINE__);
+#endif
 			goto start_over;
 		}
 	}
@@ -681,14 +702,18 @@ static void
 sample_cdev_init(void *unused)
 {
 	// Create the device file
+#if SAMPLE_DEBUG
 	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+#endif
 	sample_dev = make_dev(&sample_cdevsw, 0, UID_ROOT, GID_KMEM, 0600, SAMPLE_DEV_FILENAME);
 }
 
 static void
 sample_init(void)
 {
+#if SAMPLE_DEBUG
 	uprintf("%s\n", __FUNCTION__);
+#endif
 	KASSERT(sample_dev == NULL, ("sample device pointer is not null during module load"));
 	sample_cdev_init(NULL);
 	mtx_init(&sample_lock, "sample_lock", NULL, MTX_DEF);
@@ -698,7 +723,9 @@ static void
 sample_unload(void)
 {
 	// Is this necessary?
+#if SAMPLE_DEBUG
 	uprintf("%s\n", __FUNCTION__);
+#endif
 	(void)mtx_trylock(&sample_lock);
 	mtx_unlock(&sample_lock);
 	mtx_destroy(&sample_lock);

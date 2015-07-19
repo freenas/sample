@@ -148,6 +148,35 @@ stack_capture_user(struct thread *thread)
         return retval;
 }
 
+/*
+ * Return the requested word from the user-space address.
+ * Returns 0 if it isn't mapped.  (For what we're using it
+ * for, if the actual value is 0, that's equivalent to that.)
+ */
+static caddr_t
+GET_WORD(pmap_t map, caddr_t virtual_addr)
+{
+	caddr_t retval = 0;
+	vm_paddr_t physical_page;
+	size_t page_offset;
+	int err;
+	
+	page_offset = virtual_addr - (caddr_t)trunc_page(virtual_addr);
+	physical_page = pmap_extract(map, (vm_offset_t)virtual_addr);
+#if SAMPLE_DEBUG > 1
+	printf("%s(%p, %p):  page_offset = %d, physical_page = %ld\n", __FUNCTION__, map, (void*)virtual_addr, (int)page_offset, (long)physical_page);
+#endif
+	if (physical_page == 0) {
+		return retval;
+	}
+	if ((err = copyin(virtual_addr, &retval, sizeof(retval))) != 0) {
+#if SAMPLE_DEBUG
+		printf("%s(%d):  copyin failed: %d\n", __FUNCTION__, __LINE__, err);
+#endif
+		return 0;
+	}
+	return retval;
+}
 
 /*
  * Capture the kernel and user stacks for curthread.
@@ -166,10 +195,14 @@ md_stack_capture_curthread(caddr_t *pcs, size_t size)
 	
         size_t num_kstacks = 0, num_ustacks = 0;
 
-//	printf("%s(%d):  curthread pid %u, tid %u, name %s\n", __FUNCTION__, __LINE__, curthread->td_proc->p_pid, curthread->td_tid, curthread->td_name);
-
+#if SAMPLE_DEBUG > 2
+	printf("%s(%d):  curthread pid %u, tid %u, name %s\n", __FUNCTION__, __LINE__, curthread->td_proc->p_pid, curthread->td_tid, curthread->td_name);
+#endif
+	
         if (tf == NULL) {
-//		printf("%s(%d):  intr frame is NULL?\n", __FUNCTION__, __LINE__);
+#if SAMPLE_DEBUG > 5
+		printf("%s(%d):  intr frame is NULL?\n", __FUNCTION__, __LINE__);
+#endif
 //		tf = curthread->td_frame;
 		/*
 		 * I'm not sure what this means.  This should be done via interrupt,
@@ -204,43 +237,37 @@ md_stack_capture_curthread(caddr_t *pcs, size_t size)
                 caddr_t *start_pc = pcs + num_kstacks;
                 struct amd64_frame frame;
 
+#if SAMPLE_DEBUG > 3
+		printf("%s(%d):  doing user mode crawl\n", __FUNCTION__, __LINE__);
+#endif
                 frame.f_frame = (struct amd64_frame*)tf->tf_rbp;
                 if (tf != curthread->td_intr_frame) {
                         start_pc[num_ustacks++] = (caddr_t)tf->tf_rip;
                 }
                 while ((num_kstacks + num_ustacks) < size) {
-                        int err;
                         void *bp = frame.f_frame;
-			vm_page_t frame_page;
-			
 			/*
-			 * We use pmap_extract_and_hold to get the physical
-			 * pages with the frame on it.  We specifically want
-			 * frame.f_retaddr, and then frame.f_frame for the next
-			 * round.  (These could be on different pages.)
+			 * The calls to GET_WORD replace the non-functional:
+			 * copyin_nofault((void*)frame.f_frame, &frame, sizeof(frame));
 			 */
-			frame_page = pmap_extract_and_hold(pmap, (vm_offset_t)frame.f_frame, VM_PROT_READ);
-			if (frame_page == NULL) {
-				break;
-			} else {
-				size_t offset = (caddr_t)frame.f_frame - (caddr_t)trunc_page(frame.f_frame);
-			}
 			
-                        err = copyin_nofault((void*)frame.f_frame, &frame, sizeof(frame));
-                        if (err == 0) {
-                                if (frame.f_retaddr != 0) {
-                                        start_pc[num_ustacks++] = (caddr_t)frame.f_retaddr;
-                                        if ((void*)frame.f_frame < bp) {
-                                                break;
-                                        }
-                                } else {
-                                        break;
-                                }
-                        } else {
-                                break;
-                        }
+			if ((frame.f_frame = (__typeof(frame.f_frame))GET_WORD(pmap, (caddr_t)frame.f_frame)) == 0 ||
+			    (frame.f_retaddr = (__typeof(frame.f_retaddr))GET_WORD(pmap, (caddr_t)&frame.f_retaddr)) == 0) {
+				break;
+			}
+#if SAMPLE_DEBUG > 2
+			printf("%s(%d):  f_frame = %ld, f_retaddr = %ld\n", __FUNCTION__, __LINE__, (long)frame.f_frame, (long)frame.f_retaddr);
+#endif
+			start_pc[num_ustacks++] = (caddr_t)frame.f_retaddr;
+			if ((void*)frame.f_frame < bp) {
+				break;
+			}
                 }
-        }
+        } else {
+#if SAMPLE_DEBUG > 2
+		printf("%s(%d):  no user stack?\n", __FUNCTION__, __LINE__);
+#endif
+	}
         if (num_kstacks + num_ustacks) {
                 reverse_stack((void*)pcs, num_kstacks + num_ustacks);
         }
@@ -276,7 +303,9 @@ md_stack_capture_forthread(struct thread *td, caddr_t *pcs, size_t size)
 		bcopy(ptr, pcs, MIN(kernel_size + user_size, size));
 		retval = ustack->depth + kstack->depth;
 		if (retval > size) {
+#if SAMPLE_DEBUG
 			printf("%s(%d):  Stack for pid %u thread %u got truncated from %zu to %zu\n", __FUNCTION__, __LINE__, td->td_proc->p_pid, td->td_tid, retval, size);
+#endif
 			retval = size;
 		}
 	}
