@@ -9,7 +9,7 @@ CFLAGS+=	-I${.CURDIR}/../driver
 CFLAGS+=	-fblocks -g -O0 -I/usr/local/include
 LDFLAGS+=	-L${LOCALLIB}
 
-LDADD=	-lBlocksRuntime -lkvm -lutil -lbfd -liberty -lz
+LDADD=	-static -lBlocksRuntime -lkvm -lutil -lbfd -liberty -lz
 
 .include <bsd.prog.mk>
 
