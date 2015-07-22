@@ -109,7 +109,8 @@ stack_capture_user(struct thread *thread)
         static const size_t MAXDEPTH = 4096 / sizeof(vm_offset_t);
         caddr_t *pcs = NULL;
         int error = 0;
-
+	pmap_t pmap = vmspace_pmap(thread->td_proc->p_vmspace);
+	
         frame.f_frame = (void*)thread->td_frame->tf_rbp;
         pcs = malloc(sizeof(*pcs) * MAXDEPTH, M_TEMP, M_WAITOK | M_ZERO);
         pcs[depth++] = (caddr_t)thread->td_frame->tf_rip;
@@ -129,6 +130,11 @@ stack_capture_user(struct thread *thread)
                 uio.uio_segflg = UIO_SYSSPACE;
                 uio.uio_rw = UIO_READ;
                 uio.uio_td = curthread;
+		
+		// If it's not mapped in, just stop
+		if (pmap_extract(pmap, (vm_offset_t)frame.f_frame) == 0) {
+			break;
+		}
                 error = proc_rwmem(thread->td_proc, &uio);
                 if (error) {
 //			printf("%s(%d):  error = %d\n", __FUNCTION__, __LINE__, error);
@@ -171,7 +177,7 @@ GET_WORD(pmap_t map, caddr_t virtual_addr)
 	}
 	if ((err = copyin(virtual_addr, &retval, sizeof(retval))) != 0) {
 #if SAMPLE_DEBUG
-		printf("%s(%d):  copyin failed: %d\n", __FUNCTION__, __LINE__, err);
+		printf("%s(%d):  copyin(%p, %p, %zd)  failed: %d\n", __FUNCTION__, __LINE__, (void*)virtual_addr, &retval, sizeof(retval), err);
 #endif
 		return 0;
 	}
@@ -251,8 +257,18 @@ md_stack_capture_curthread(caddr_t *pcs, size_t size)
 			 * copyin_nofault((void*)frame.f_frame, &frame, sizeof(frame));
 			 */
 			
-			if ((frame.f_frame = (__typeof(frame.f_frame))GET_WORD(pmap, (caddr_t)frame.f_frame)) == 0 ||
-			    (frame.f_retaddr = (__typeof(frame.f_retaddr))GET_WORD(pmap, (caddr_t)&frame.f_retaddr)) == 0) {
+			frame.f_frame = (struct amd64_frame*)GET_WORD(pmap, (caddr_t)frame.f_frame);
+			if (frame.f_frame == 0) {
+#if SAMPLE_DEBUG > 4
+				printf("%s(%d):  %s:  frame is 0\n", __FUNCTION__, __LINE__, curthread->td_name);
+#endif
+				break;
+			}
+			frame.f_retaddr = (long)GET_WORD(pmap, (caddr_t)frame.f_frame + offsetof(struct amd64_frame, f_retaddr));
+			if (frame.f_retaddr == 0) {
+#if SAMPLE_DEBUG > 4
+				printf("%s(%d):  %s:  retaddr from frame %p is 0\n", __FUNCTION__, __LINE__, curthread->td_name, (void*)frame.f_frame);
+#endif
 				break;
 			}
 #if SAMPLE_DEBUG > 2
@@ -268,6 +284,9 @@ md_stack_capture_curthread(caddr_t *pcs, size_t size)
 		printf("%s(%d):  no user stack?\n", __FUNCTION__, __LINE__);
 #endif
 	}
+#if SAMPLE_DEBUG > 1
+	printf("%s(%d):  %s:  %zd ustacks\n", __FUNCTION__, __LINE__, curthread->td_name, num_ustacks);
+#endif
         if (num_kstacks + num_ustacks) {
                 reverse_stack((void*)pcs, num_kstacks + num_ustacks);
         }
