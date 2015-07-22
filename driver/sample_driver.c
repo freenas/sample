@@ -379,11 +379,11 @@ release_sample_data(void)
                         kern_sample_set_t *cur_set;
 
                         cur_set = kern_samples->cpu_sample_sets[cpu_index];
-			mtx_destroy(&cur_set->sample_spin);
 #if SAMPLE_DEBUG
 			uprintf("%s(%d):  Calling callout_drain now\n", __FUNCTION__, __LINE__);
 #endif
                         callout_drain(&cur_set->sample_callout);
+			mtx_destroy(&cur_set->sample_spin);
 			if (cur_set->temp_buffer)
 				free(cur_set->temp_buffer, M_SAMPLE);
 			free(cur_set, M_SAMPLE);
