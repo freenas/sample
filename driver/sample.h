@@ -3,7 +3,7 @@
 
 # include <sys/ioccom.h>
 
-# define SAMPLE_DEBUG 1
+# define SAMPLE_DEBUG 0
 
 # define SAMPLE_DEV_FILENAME	"sample"
 

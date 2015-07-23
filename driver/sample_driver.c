@@ -300,7 +300,7 @@ sample_cpu_handler(void *arg)
  *
  * Unlike the per-cpu one, it will get many sets of samples.
  */
-static void __unused
+static void
 sample_sleeping_handler(void *arg)
 {
 	kern_sample_set_t *ctx = arg;
@@ -353,14 +353,10 @@ sample_sleeping_handler(void *arg)
 	sx_sunlock(&allproc_lock);
 	wakeup(&sample_data_ready);
 	mtx_lock_spin(&ctx->sample_spin);
+//	printf("sleeping sample count %u\n", ctx->sample_count);
 	if (ctx->sample_count-- > 1) {
-#ifdef C_DIRECT_EXEC
-		callout_reset_sbt_on(&ctx->sample_callout, tvtosbt(ctx->sample_ms), 1,
-				     sample_sleeping_handler, arg, PCPU_GET(cpuid), 0);
-#else
 		int ticks_ms = tvtohz(&ctx->sample_ms);
-		callout_reset_on(&ctx->sample_callout, ticks_ms, sample_sleeping_handler, ctx, PCPU_GET(cpuid));
-#endif
+		callout_reset(&ctx->sample_callout, ticks_ms, sample_sleeping_handler, ctx);
 	}
 	mtx_unlock_spin(&ctx->sample_spin);
 	return;
