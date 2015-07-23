@@ -306,24 +306,20 @@ main(int ac, char **av)
 							}, ^(void *val) {
 								char *retval;
 								off_t off;
-								if (symbolicate == 0) {
-									SymbolFile_t *sf = NULL;
-									if (pool) {
-										sf = FindSymbolFileByAddress(pool, val, &off);
-									}
+								SymbolFile_t *sf = NULL;
+								asprintf(&retval, "%p", val);
+								if (pool) {
+									sf = FindSymbolFileByAddress(pool, val, &off);
 									if (sf) {
-										asprintf(&retval, "%p (%s + %llu)", val, sf->pathname, (long long)off);
-									} else {
-										asprintf(&retval, "%p", val);
+										asprintf(&retval, "%s (%s + %llu)", retval, sf->pathname, (long long)off);
 									}
-								} else {
-									char *tmp;
-									tmp = FindSymbolForAddress(pool, val, &off);
-									if (tmp) {
-										asprintf(&retval, "%p (%s + %llu)", val, tmp, (long long)off);
-										free(tmp);
-									} else {
-										asprintf(&retval, "%p", val);
+									if (symbolicate) {
+										char *tmp;
+										tmp = FindSymbolForAddress(pool, val, &off);
+										if (tmp) {
+											asprintf(&retval, "%s (%s + %llu)", retval, tmp, (long long)off);
+											free(tmp);
+										}
 									}
 								}
 								return retval;
