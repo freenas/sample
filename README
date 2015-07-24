@@ -47,6 +47,8 @@ The symbolication does not do the right thing at all for kernel
 modules.  And since the system is installed stripped, there are no
 symbols for most programs.
 
+Currently only amd64 support is provided.
+
 HOW TO READ THE OUTPUT
 
 First up is the process, which includes the process ID, name, and the
