@@ -1,0 +1,117 @@
+sample is a program to take periodic stack traces of all processes
+running on the system.  It then presents the stack history and
+combined count.  (This is modeled on the Mac OS X programs sample
+and spindump.)
+
+There are two parts to the program:  the device driver, and the
+user-mode program.  In retrospect, the name "sample" may be a poor
+choice here, as seeing "sample_driver.ko" in the list of loaded kernel
+modules does not really convey information about the driver.
+
+The device driver creates a node in /dev, called "sample"; it uses an
+ioctl to start the sampling process.  The command specifies number of
+samples to take, and the duration between them.
+
+Internally, the driver then schedules a number of callout(9) tasks --
+one for each CPU, and then an additional one.  The CPU-specific ones
+examine the thread that is running on that CPU at that time; the
+remaining one examines the stacks for all sleeping threads on the
+system.
+
+When finished, the user-mode program, sample, then collects the data
+and presents it.  It also includes a list of executable files mapped
+into each process' space (this includes the main executable, as well
+as shared libraries).  With the -S option, it will also attempt to
+symbolicate.
+
+To build, simply use "make'.
+
+To use it, you must first load the device driver.  E.g.:
+
+	sudo kldload ./driver/sample_driver.ko
+
+After that, you can then run the sample program (which must be run
+as root):
+
+	sudo ./sample/sample -n 100 -S > /tmp/sample.txt
+
+which will take 100 samples, at 10ms, and attempt to symbolicate
+them.
+
+WARNING
+
+This consists of a work-in-progress KERNEL MODULE.  As such, the
+system may panic, or deadlock.  Use at your own risk.
+
+The symbolication does not do the right thing at all for kernel
+modules.  And since the system is installed stripped, there are no
+symbols for most programs.
+
+HOW TO READ THE OUTPUT
+
+First up is the process, which includes the process ID, name, and the
+path.  After that, it says how many samples were taken.  N.B.:  this
+is the _total_ number of samples taken for the process, so it is the
+sum of all the samples for all of the threds.  (In the case, below,
+sample only has one thread.)
+
+After that is a list of each thread, and then the samples.  Each
+sample line output has the format:
+
+	<number>	<addresss> (<file> + <offset>) [(<file>:<symbol> + <offset>)]
+
+The last set is optional, and only if -S is given.
+
+<address> is indented to indicate stack level.
+
+	Process 16713 (sample, pathname /home/sef/src/sample/sample/sample):
+	356 samples
+
+	Thread ID 100891
+	346   0x40030f (/home/sef/src/sample/sample/sample + 783) (/home/sef/src/sample/sample/sample:_start + 367)
+	346    0x72719a (/home/sef/src/sample/sample/sample + 3305882) (/home/sef/src/sample/sample/sample:_read + 10)
+	346     0xffffffff80d18efb (/boot/kernel/kernel + 11636475) (/boot/kernel/kernel:Xfast_syscall + 251)
+	346      0xffffffff80d33e3c (/boot/kernel/kernel + 11746876) (/boot/kernel/kernel:amd64_syscall + 844)
+	346       0xffffffff80993aa3 (/boot/kernel/kernel + 7944867) (/boot/kernel/kernel:sys_read + 99)
+	346        0xffffffff80993b18 (/boot/kernel/kernel + 7944984) (/boot/kernel/kernel:kern_readv + 104)
+	346         0xffffffff80993df5 (/boot/kernel/kernel + 7945717) (/boot/kernel/kernel:dofileread + 149)
+	346          0xffffffff8082d7d8 (/boot/kernel/kernel + 6477784) (/boot/kernel/kernel:devfs_read_f + 216)
+	346           0xffffffff81e11289 (./driver/sample_driver.ko + 649) (./driver/sample_driver.ko + 18446744071593591273)
+	346            0xffffffff80949d8d (/boot/kernel/kernel + 7642509) (/boot/kernel/kernel:_sleep + 637)
+	346             0xffffffff80988cbf (/boot/kernel/kernel + 7900351) (/boot/kernel/kernel:sleepq_wait_sig + 15)
+	346              0xffffffff80988e0b (/boot/kernel/kernel + 7900683) (/boot/kernel/kernel:sleepq_catch_signals + 171)
+	346               0xffffffff8094a371 (/boot/kernel/kernel + 7644017) (/boot/kernel/kernel:mi_switch + 225)
+	4  0x40030f (/home/sef/src/sample/sample/sample + 783) (/home/sef/src/sample/sample/sample:_start + 367)
+	3   0x401605 (/home/sef/src/sample/sample/sample + 5637) (/home/sef/src/sample/sample/sample:main + 1221)
+	1    0x401c7b (/home/sef/src/sample/sample/sample + 7291) (/home/sef/src/sample/sample/sample:AddSampleInformation + 43)
+	1     0x400fbd (/home/sef/src/sample/sample/sample + 4029) (/home/sef/src/sample/sample/sample:ProcessGetVMMaps + 77)
+	1      0x72779a (/home/sef/src/sample/sample/sample + 3307418) (/home/sef/src/sample/sample/sample:__sysctl + 10)
+	1       0xffffffff80d18efb (/boot/kernel/kernel + 11636475) (/boot/kernel/kernel:Xfast_syscall + 251)
+	1        0xffffffff80d33e3c (/boot/kernel/kernel + 11746876) (/boot/kernel/kernel:amd64_syscall + 844)
+	1         0xffffffff8094c9e4 (/boot/kernel/kernel + 7653860) (/boot/kernel/kernel:sys___sysctl + 116)
+	1          0xffffffff8094cbf8 (/boot/kernel/kernel + 7654392) (/boot/kernel/kernel:userland_sysctl + 472)
+	1           0xffffffff8094c624 (/boot/kernel/kernel + 7652900) (/boot/kernel/kernel:sysctl_root + 532)
+	1            0xffffffff80934b21 (/boot/kernel/kernel + 7555873) (/boot/kernel/kernel:sysctl_kern_proc_vmmap + 81)
+	1             0xffffffff809333c9 (/boot/kernel/kernel + 7549897) (/boot/kernel/kernel:kern_proc_vmmap_out + 1609)
+	1              0xffffffff80e5a021 (/boot/kernel/kernel + 12951585) (/boot/kernel/kernel:VOP_GETATTR_APV + 161)
+	1    0x401cb7 (/home/sef/src/sample/sample/sample + 7351) (/home/sef/src/sample/sample/sample:AddSampleInformation + 103)
+	1     0x4010fb (/home/sef/src/sample/sample/sample + 4347) (/home/sef/src/sample/sample/sample:ThreadAddStack + 59)
+	1      0x6fa115 (/home/sef/src/sample/sample/sample + 3121429) (/home/sef/src/sample/sample/sample:realloc + 661)
+	1   0x401568 (/home/sef/src/sample/sample/sample + 5480) (/home/sef/src/sample/sample/sample:main + 1064)
+	6  0x72719a (/home/sef/src/sample/sample/sample + 3305882) (/home/sef/src/sample/sample/sample:_read + 10)
+	6   0xffffffff80d18efb (/boot/kernel/kernel + 11636475) (/boot/kernel/kernel:Xfast_syscall + 251)
+	6    0xffffffff80d33e3c (/boot/kernel/kernel + 11746876) (/boot/kernel/kernel:amd64_syscall + 844)
+	6     0xffffffff80993aa3 (/boot/kernel/kernel + 7944867) (/boot/kernel/kernel:sys_read + 99)
+	6      0xffffffff80993b18 (/boot/kernel/kernel + 7944984) (/boot/kernel/kernel:kern_readv + 104)
+	6       0xffffffff80993df5 (/boot/kernel/kernel + 7945717) (/boot/kernel/kernel:dofileread + 149)
+	6        0xffffffff8082d7d8 (/boot/kernel/kernel + 6477784) (/boot/kernel/kernel:devfs_read_f + 216)
+	4         0xffffffff81e113e7 (./driver/sample_driver.ko + 999) (./driver/sample_driver.ko + 18446744071593591623)
+	1         0xffffffff81e1157c (./driver/sample_driver.ko + 1404) (./driver/sample_driver.ko + 18446744071593592028)
+	1         0xffffffff81e11554 (./driver/sample_driver.ko + 1364) (./driver/sample_driver.ko + 18446744071593591988)
+	1          0xffffffff8092c232 (/boot/kernel/kernel + 7520818) (/boot/kernel/kernel:__mtx_lock_spin_flags + 50)
+
+	Mapped Files:
+		Start	End	File
+		0x400000	0x8a2000	/home/sef/src/sample/sample/sample
+		0xaa1000	0xac2000	/home/sef/src/sample/sample/sample
+
