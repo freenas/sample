@@ -231,23 +231,35 @@ main(int ac, char **av)
 	free(sample_buffer);
 
 	SymbolPool_t kernelPool = CreateSymbolPool();
+	// This is ugly
+	char *kld_info = NULL;
         if (kernelPool) {
                 int mod_id = 0;
+		asprintf(&kld_info, "Kernel Modules\n%10s\t%20s\t%10s\t%s\n", "Index", "Address", "Size", "Filename");
                 while ((mod_id = kldnext(mod_id)) > 0) {
                         struct kld_file_stat mod_stat = { .version = sizeof(mod_stat) };
                         if (kldstat(mod_id, &mod_stat) != -1) {
+				/*
+				 * What to do here?  kmods have addresses with a base
+				 * of zero, but the kernel has them with their actual address.
+				 */
                                 SymbolFile_t *f = CreateSymbolFile(mod_stat.pathname,
                                                                    0, // Is this right?
                                                                    mod_stat.address,
                                                                    mod_stat.size);
                                 if (f) {
                                         (void)AddSymbolFile(kernelPool, f);
+					asprintf(&kld_info, "%s%10d\t%20p\t%10zd\t%s\n",
+						 kld_info,
+						 mod_id, mod_stat.address, mod_stat.size,
+						 mod_stat.pathname);
                                         ReleaseSymbolFile(f);
                                 }
                         } else {
                                 warn("Could not stat kernel mod_id %d", mod_id);
                         }
                 }
+		printf("\n");
         }
 
 	IterateHash(ProcHash, ^(void *object) {
@@ -284,6 +296,7 @@ main(int ac, char **av)
 						if (kernelPool) {
 							AddSymbolPool(pool, kernelPool);
 						}
+//						DumpSymbolPool(pool);
 					}
 
 					if (thread->numStacks > 0) {
@@ -366,5 +379,8 @@ main(int ac, char **av)
 		});
 	DestroyHash(ProcHash);
 
+	if (kld_info)
+		printf("%s", kld_info);
+	
 	return 0;
 }

@@ -15,6 +15,17 @@ typedef struct SymbolPoolInternal {
 	SymbolFile_t	*files;
 } SymbolPoolInternal_t;
 
+void
+DumpSymbolPool(SymbolPool_t *pool)
+{
+	SymbolPoolInternal_t *p = (void*)pool;
+	size_t indx;
+
+	for (indx = 0; indx < p->count; indx++) {
+		DumpSymbolGroup(p->files[indx].group);
+	}
+}
+
 SymbolFile_t *
 CreateSymbolFile(const char *path, off_t offset, void *addr, size_t len)
 {

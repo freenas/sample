@@ -133,7 +133,7 @@ FindSymbolInGroup(struct SymbolGroup *group, uintptr_t addr, uintptr_t base)
 	struct Symbol *retval = NULL;
 
 #ifdef DEBUG_SYMBOLS
-	fprintf(stdout, "%s(%p {%s}, %p, %p)\n", __FUNCTION__, group, (group && group->name) ? group->name : "<unknown>", (void*)addr, (void*)base);
+	fprintf(stderr, "%s(%p {%s}, %p, %p):  offset = %zd\n", __FUNCTION__, group, (group && group->name) ? group->name : "<unknown>", (void*)addr, (void*)base, addr - base);
 #endif
 
 	if (group == NULL ||
@@ -147,7 +147,10 @@ FindSymbolInGroup(struct SymbolGroup *group, uintptr_t addr, uintptr_t base)
 	     indx++) {
 		struct Symbol *ptr = group->symbols[indx];
 #ifdef DEBUG_SYMBOLS
-		fprintf(stdout, "%s:  addr = %p, current symbol = { %p, %d, %s }\n", __FUNCTION__, (void*)addr, (void*)ptr->address, ptr->reloc, ptr->name);
+		fprintf(stderr,
+			"%s:  addr = %p, current symbol = { %p, %d, %s }\n",
+			__FUNCTION__, (void*)addr, (void*)ptr->address, ptr->reloc, ptr->name
+			);
 #endif
 		if (addr > (ptr->address + (ptr->reloc ? base : 0))) {
 			retval = ptr;
