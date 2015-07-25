@@ -12,11 +12,14 @@ typedef struct SymbolFile {
 	off_t offset;	// Offset of file that is mapped into memory
 	uintptr_t	base;	// Where it's mapped to in memory
 	size_t len;	// How much of it is mapped to in memory
+	int	force_reloc;	// Treat the symbols in it as actually relocatable
 	struct SymbolGroup *group;	// Symbols for this object.
 } SymbolFile_t;
 
 SymbolFile_t *CreateSymbolFile(const char *path, off_t offset, void *addr, size_t len);
 void ReleaseSymbolFile(SymbolFile_t *);
+
+void SymbolFileSetReloc(SymbolFile_t *);
 
 typedef void *SymbolPool_t;	// Actually an array of SymbolFile_t
 

@@ -248,6 +248,9 @@ main(int ac, char **av)
                                                                    mod_stat.address,
                                                                    mod_stat.size);
                                 if (f) {
+					if (mod_id != 1) {
+						SymbolFileSetReloc(f);
+					}
                                         (void)AddSymbolFile(kernelPool, f);
 					asprintf(&kld_info, "%s%10d\t%20p\t%10zd\t%s\n",
 						 kld_info,

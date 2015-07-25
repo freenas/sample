@@ -61,6 +61,12 @@ ReleaseSymbolFile(SymbolFile_t *s)
 	return;
 }
 
+void
+SymbolFileSetReloc(SymbolFile_t *sf)
+{
+	sf->force_reloc = 1;
+}
+
 SymbolPool_t
 CreateSymbolPool(void)
 {
@@ -240,11 +246,12 @@ FindSymbolForAddress(SymbolPool_t pool_in, void *addr, off_t *offPtr)
 			 * this can have the offset be beyond the range of the mapping.  So in
 			 * that case, we need to just use the filename.
 			 */
-			offset = ((uintptr_t)addr - (symbol->reloc ? sf->base : 0)) - symbol->address;
+			offset = ((uintptr_t)addr - ((symbol->reloc || sf->force_reloc) ? sf->base : 0)) - symbol->address;
 			if ((sf->base + offset) < sf->base ||
 			    (sf->base + offset) > (sf->base + sf->len)) {
-				retval = strdup(sf->pathname);
-				offset = (__typeof(offset))addr - symbol->address;
+				// The math here is just wrong.
+				// We haven't found the symbol, so we shouldn't pretend we have.
+				return NULL;
 			} else {
 				asprintf(&retval, "%s:%s", sf->pathname, symbol->name);
 			}
