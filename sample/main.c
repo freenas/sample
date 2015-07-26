@@ -357,7 +357,7 @@ main(int ac, char **av)
 									level = NodeAddValue(level, trace);
 								}
 							}
-							PrintTree(root, 1);
+							PrintTree(root, 0);
 						}
 					}
 					return 1;

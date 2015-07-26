@@ -105,7 +105,7 @@ PrintTree(Node_t *level, int indent)
 
 	if (level->value) {
 		char *strValue = helpers->string(level->value);
-		printf("%zu%*s%s\n", level->count, indent, "", strValue);
+		printf("%*s %10zu %s\n", indent, "", level->count, strValue);
 		free(strValue);
 	}
 	for (indx = 0;
