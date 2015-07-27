@@ -24,7 +24,13 @@ into each process' space (this includes the main executable, as well
 as shared libraries).  With the -S option, it will also attempt to
 symbolicate.
 
-To build, simply use "make'.
+To build the user-mode program, you need to have libbfd installed;
+this also then requires libiberty.  It builds the program staticly
+linked, so they are not required to run.  (libbfd could be avoided
+with a compile-time flag to disable symbolication, however.)
+Otherwise, to build, just
+
+	make
 
 To use it, you must first load the device driver.  E.g.:
 
