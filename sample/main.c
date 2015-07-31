@@ -177,7 +177,8 @@ main(int ac, char **av)
 
 	opts.milliseconds = sample_duration;
 	opts.count = sample_count;
-
+	fprintf(stderr, "opts.count = %d\n", opts.count);
+	
 	if (ioctl(sample_fd, KSIOC_START, &opts) == -1) {
 		err(1, "Could not start sampling");
 	}

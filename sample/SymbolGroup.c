@@ -5,8 +5,10 @@
 #include <errno.h>
 #include <string.h>
 
-#include <libutil.h>
-#include <bfd.h>
+#if BFD
+# include <libutil.h>
+# include <bfd.h>
+#endif
 
 #include "Symbol.h"
 #include "SymbolGroup.h"
@@ -178,6 +180,7 @@ AllocSymbolGroup(const char *name, size_t howmany)
 	return retval;
 }
 
+#if BFD==1
 static struct SymbolGroup *
 slurp_symtab(bfd *abfd)
 {
@@ -231,6 +234,7 @@ no_bfd_error(const char *fmt, ...)
 {
 	return;
 }
+#endif
 
 
 struct SymbolGroup *
@@ -243,8 +247,9 @@ CopySymbolGroup(struct SymbolGroup *orig)
 struct SymbolGroup *
 CreateSymbolGroup(const char *fname)
 {
-	bfd *abfd;
 	struct SymbolGroup *retval = NULL;
+#if BFD
+	bfd *abfd;
 
 #ifdef DEBUG_SYMBOLS
 	fprintf(stderr, "%s(%s)\n", __FUNCTION__, fname);
@@ -256,5 +261,7 @@ CreateSymbolGroup(const char *fname)
 		}
 		bfd_close(abfd);
 	}
+#endif
+
 	return retval;
 }
