@@ -328,13 +328,13 @@ main(int ac, char **av)
 								if (pool) {
 									sf = FindSymbolFileByAddress(pool, val, &off);
 									if (sf) {
-										asprintf(&retval, "%s (%s + %llu)", retval, sf->pathname, (long long)off);
+										asprintf(&retval, "%s (%s + %#llx)", retval, sf->pathname, (long long)off);
 									}
 									if (symbolicate) {
 										char *tmp;
 										tmp = FindSymbolForAddress(pool, val, &off);
 										if (tmp) {
-											asprintf(&retval, "%s (%s + %llu)", retval, tmp, (long long)off);
+											asprintf(&retval, "%s (%s + %#llx)", retval, tmp, (long long)off);
 											free(tmp);
 										}
 									}
