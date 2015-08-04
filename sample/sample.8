@@ -1,0 +1,49 @@
+.Dd August 3, 2015
+.Dt SAMPLE 8
+.Os
+.Sh NAME
+.Nm sample
+.Nd examine backtrace of system processes
+.Sh SYNOPSIS
+.Nm
+.Op Fl n Ar count
+.Op Fl s Ar duration
+.Op Fl  S
+.Sh DESCRIPTION
+The
+.Nm
+utility performs a periodic examination of stacks (user
+and kernel) for all processes on the system.
+.Pp
+The
+.Fl n
+option specifies the number of samples to take; the
+.Fl s
+option indicates the duration, in ms (default is 20).
+The
+.Fl S
+option will attempt to symbolicate the addresses.  Note
+that this option may not be enabled at compile time, but
+will not generate an error if so.
+.Pp
+The
+.Nm
+utility requires a corresponding device driver to be loaded.
+Only one instance can be run at a time.
+.Sh HISTORY
+The
+.Nm
+utility was written by iXsystems in 2014, inspired heavily by
+the spindump utility in Mac OS X by Apple, Inc.
+.Sh BUGS
+Only one instance may be run at a time.
+.Pp
+No attempt is made to load or unload the required device
+driver.
+.Pp
+The name leaves a lot to be desired.
+.Pp
+The sampling of idle processes can take longer than the
+duration, resulting in fewer samples than requested.
+.Pp
+Even when enabled, the symbolication could be better.

@@ -271,11 +271,16 @@ sample_cpu_handler(void *arg)
 			printf("%s(%d):  Sample for <pid %u, tid %u> on cpu %d was empty\n", __FUNCTION__, __LINE__, samp->pid, samp->tid, samp->cpuid);
 #endif
 		}
+		mtx_lock_spin(&ctx->sample_spin);
+		if (ctx->sample_count > 0)
+			ctx->sample_count--;
+		mtx_unlock_spin(&ctx->sample_spin);
         }
+       
 	wakeup(&sample_data_ready);
 
 	mtx_lock_spin(&ctx->sample_spin);
-	if (ctx->sample_count-- > 1) {
+	if (ctx->sample_count > 0) {
 #if SAMPLE_DEBUG > 1
 		struct timespec now;
 		getnanouptime(&now);
@@ -513,6 +518,8 @@ sample_ioctl(struct cdev *dev,
 				goto done;
 			}
 			// Now initialize each of the entries
+			uprintf("%s(%d):  opts->count = %d\n", __FUNCTION__, __LINE__, opts->count);
+			
 			for (cpu_index = 0, cur_cpu = CPU_FIRST(); cpu_index < ncpus; cpu_index++, cur_cpu = CPU_NEXT(cur_cpu)) {
 				kern_sample_set_t *cur_set = kern_samples->cpu_sample_sets[cpu_index];
 				mtx_init(&cur_set->sample_spin, "Sampling spin lock", NULL, MTX_SPIN);

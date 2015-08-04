@@ -2,7 +2,8 @@ CC=	clang	# for blocks
 PROG=	sample
 SRCS=	Hash.c Proc.c Thread.c main.c Tree.c \
 	Stack.c Symbol.c SymbolGroup.c
-MAN=
+MAN8=	sample.8
+
 LOCALLIB=	/usr/local/lib
 
 .if !defined(USE_BFD)
