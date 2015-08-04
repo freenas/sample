@@ -26,8 +26,8 @@ LDADD+=	-lbfd -liberty -lz
 
 beforeinstall:
 	$(INSTALL) -d -m 755 -o root -g wheel $(DESTDIR)$(BINDIR)
-	$(INSTALL) -d -m 755 -o root -g wheel $(DESTDIR)$(MANDIR)/man8
-	$(INSTALL) -d -m 755 -o root -g wheel $(DESTDIR)$(MANDIR)/cat8
+	$(INSTALL) -d -m 755 -o root -g wheel $(DESTDIR)$(MANDIR)8
+	$(INSTALL) -d -m 755 -o root -g wheel $(DESTDIR)$(MANDIR)8
 
 .include <bsd.prog.mk>
 
