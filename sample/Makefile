@@ -25,7 +25,7 @@ LDADD+=	-lbfd -liberty -lz
 .endif
 
 beforeinstall:
-	$(INSTALL) -d -m 755 -o root -g wheel $(BINDIR)
+	$(INSTALL) -d -m 755 -o root -g wheel $(DESTDIR)$(BINDIR)
 
 .include <bsd.prog.mk>
 
