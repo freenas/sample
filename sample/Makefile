@@ -3,8 +3,7 @@ PROG=	sample
 SRCS=	Hash.c Proc.c Thread.c main.c Tree.c \
 	Stack.c Symbol.c SymbolGroup.c
 BINDIR?=	/usr/local/bin
-#MAN8=	sample.8
-MAN=
+MAN8=	sample.8
 
 LOCALLIB=	/usr/local/lib
 
