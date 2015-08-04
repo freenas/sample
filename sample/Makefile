@@ -2,6 +2,7 @@ CC=	clang	# for blocks
 PROG=	sample
 SRCS=	Hash.c Proc.c Thread.c main.c Tree.c \
 	Stack.c Symbol.c SymbolGroup.c
+BINDIR?=	/usr/local/bin
 MAN8=	sample.8
 
 LOCALLIB=	/usr/local/lib
@@ -22,6 +23,9 @@ LDADD=	-static -lBlocksRuntime -lkvm -lutil
 .if defined(USE_BFD) && ${USE_BFD} == "YES"
 LDADD+=	-lbfd -liberty -lz
 .endif
+
+beforeinstall:
+	$(INSTALL) -d -m 755 -o root -g wheel $(BINDIR)
 
 .include <bsd.prog.mk>
 
