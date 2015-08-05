@@ -7,6 +7,8 @@
 #include <fcntl.h>
 #include <sys/syscall.h>
 
+#include <sys/stat.h>
+
 #include <sys/param.h>
 #include <sys/linker.h>
 #include <sys/sysctl.h>
@@ -25,6 +27,9 @@
 
 int debug = 0;
 int verbose = 0;
+
+static const char *kSamplePath = "/dev/sample";
+static const char *kSampleDeviceKmod = "sample_driver.ko";
 
 static int
 iterate_procs(kvm_t *kvm, void (^handler)(struct kinfo_proc *))
@@ -114,10 +119,28 @@ usage(void)
 	     "\tsample duration in ms (default 10)");
 }
 
+static int
+open_device(void)
+{
+	int retval;
+
+	retval = open(kSamplePath, O_RDONLY);
+	if (retval == -1 && errno == ENOENT) {
+		// Try loading it
+		int l;
+
+		l = kldload(kSampleDeviceKmod);
+		if (l == -1) {
+			warn("Could not load sample device driver");
+		}
+		retval = open(kSamplePath, O_RDONLY);
+	}
+	return retval;
+}
+
 int
 main(int ac, char **av)
 {
-	static const char *kSamplePath = "/dev/sample";
 	ssize_t nread;
 	int sample_fd;
 	int num_syms;
@@ -163,7 +186,7 @@ main(int ac, char **av)
 		}
 	}
 	
-	sample_fd = open(kSamplePath, O_RDONLY);
+	sample_fd = open_device();
 	if (sample_fd == -1) {
 		err(1, "Could not open sample device");
 	}
