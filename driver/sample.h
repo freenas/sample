@@ -1,9 +1,16 @@
 #ifndef _SAMPLE_DRIVER_H_
 # define _SAMPLE_DRIVER_H_
 
+# include <sys/param.h>
 # include <sys/ioccom.h>
 
 # define SAMPLE_DEBUG 0
+
+# define SAMPLE_VERSION 1
+
+# define SAMPLE_ALLPROCS	0x0000	// All processes
+# define SAMPLE_BYNAME	0x0001	// Only processes with the given name
+# define SAMPLE_BYPID	0x0002	// Only the given process (and all its threads)
 
 # define SAMPLE_DEV_FILENAME	"sample"
 
@@ -17,8 +24,12 @@ enum {
 };
 
 struct ksample_opts {
+	int	version;	// Should be SAMPLE_VERSION
+	int	flags;	// See above
 	int	milliseconds;	// may be more later
 	int	count;	// How many samples to use
+	pid_t	pid;
+	char	name[MAXCOMLEN + 1];	// Must include the NUL
 };
 
 typedef struct {

@@ -86,6 +86,32 @@ GetProcessPathname(pid_t pid)
 	return NULL;
 }
 
+static int
+MatchTargetProcess(pid_t pid,
+		   pid_t target_pid,
+		   char **names,
+		   size_t num_names)
+{
+	if (target_pid != 0 && pid == target_pid)
+		return 1;
+	if (num_names > 0) {
+		char *pname = (char*)GetProcName(pid);
+		size_t indx;
+		if (pname == NULL) {
+			return 0;
+		}
+		for (indx = 0; indx < num_names; indx++) {
+			if (strcmp(names[indx], pname) == 0) {
+				free(pname);
+				return 1;
+			}
+		}
+		free(pname);
+	} else if (target_pid == 0)
+		return 1;
+	return 0;
+}
+
 static uint8_t profile_buffer[128 * 1024];	// 128k should be enough
 static void
 AddSampleInformation(SampleProc_t *proc, kern_sample_t *sample)
@@ -151,7 +177,9 @@ main(int ac, char **av)
 	uint8_t *sample_buffer = NULL;
 	uint32_t sample_duration = 10;	// in ms
 	uint32_t sample_count = 100;
-	pid_t target = 0;	// 0 means all processes
+	pid_t sample_target = 0;	// 0 means all processes
+	char **sample_names = NULL;
+	size_t num_sample_names = 0;
 	static const int kSampleBufferSize = 1024 * 1024;
 	int symbolicate = 0;
 
@@ -173,7 +201,10 @@ main(int ac, char **av)
 			}
 			break;
 		case 'p':
-			target = atoi(optarg);
+			sample_target = atoi(optarg);
+			if (sample_target == 0) {
+				errx(1, "Invalid process id %s", optarg);
+			}
 			break;
 		case 'd':
 			debug++;
@@ -185,6 +216,19 @@ main(int ac, char **av)
 			usage();
 		}
 	}
+	
+	av += optind;
+	ac -= optind;
+	if (ac != 0) {
+		if (sample_target != 0) {
+			errx(1, "Cannot specify both pid and process name%s", ac == 1 ? "" : "s");
+		}
+		sample_names = av;
+		num_sample_names = ac;
+		fprintf(stderr, "num_sample_names = %zd\n", num_sample_names);
+	}
+	
+	// Some sanity checking now
 	
 	sample_fd = open_device();
 	if (sample_fd == -1) {
@@ -198,6 +242,8 @@ main(int ac, char **av)
 		err(1, "Could not allocate sample buffer");
 	}
 
+	opts.version = SAMPLE_VERSION;
+	opts.flags = SAMPLE_ALLPROCS;
 	opts.milliseconds = sample_duration;
 	opts.count = sample_count;
 	fprintf(stderr, "opts.count = %d\n", opts.count);
@@ -232,7 +278,7 @@ main(int ac, char **av)
 		while (ptr < end) {
 			kern_sample_t *samp = (void*)ptr;
 			SampleProc_t *p;
-			if (target == 0 || samp->pid == target) {
+			if (MatchTargetProcess(samp->pid, sample_target, sample_names, num_sample_names)) {
 				p = FindProcess(ProcHash, samp->pid);
 				if (p == NULL) {
 					const char *pathname = GetProcessPathname(samp->pid);
