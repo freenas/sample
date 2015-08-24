@@ -3,22 +3,28 @@
 #include <unistd.h>
 #include <string.h>
 
+#include <libxo/xo.h>
+
 #include <Block.h>
 
+#include "Symbol.h"
 #include "Tree.h"
 
 typedef struct TreeHelpers {
 	int	(^compare)(void *left, void *right);	// Standard compare, a la memcmp
 	void*	(^retain)(void *);	// Reference counter.  May simply duplicate value
 	void	(^release)(void *);	// Deallocate the object
-	char*	(^string)(void *);	// Value as a string; will be free'd when done
+	SampleInstance_t	(^instance)(void *);	// Value as a string; will be free'd when done
 } TreeHelpers_t;
 
 /*
  * Create a tree with the given functions.
  */
 Node_t *
-CreateTree(void* (^retain)(void *), int (^compar)(void *, void*), void (^rel)(void *), char* (^str)(void *))
+CreateTree(void* (^retain)(void *),
+	   int (^compar)(void *, void*),
+	   void (^rel)(void *),
+	   SampleInstance_t (^instance)(void *))
 {
 	Node_t *retval = calloc(1, sizeof(*retval));
 	TreeHelpers_t *helpers = calloc(1, sizeof(*helpers));
@@ -26,7 +32,7 @@ CreateTree(void* (^retain)(void *), int (^compar)(void *, void*), void (^rel)(vo
 	helpers->retain = _Block_copy(retain);
 	helpers->compare = _Block_copy(compar);
 	helpers->release = _Block_copy(rel);
-	helpers->string = _Block_copy(str);
+	helpers->instance = _Block_copy(instance);
 
 	retval->helpers = helpers;
 
@@ -92,7 +98,7 @@ ReleaseTree(Node_t *tree)
 		_Block_release(tree->helpers->compare);
 		_Block_release(tree->helpers->retain);
 		_Block_release(tree->helpers->release);
-		_Block_release(tree->helpers->string);
+		_Block_release(tree->helpers->instance);
 		free(tree);
 	}
 }
@@ -103,17 +109,40 @@ PrintTree(Node_t *level, int indent)
 	size_t indx;
 	TreeHelpers_t *helpers = level->helpers;
 
+	xo_open_instance("stacks");
 	if (level->value) {
-		char *strValue = helpers->string(level->value);
-		printf("%*s %zu %s\n", indent-1, "", level->count, strValue);
-		free(strValue);
+		SampleInstance_t si = helpers->instance(level->value);
+		
+		// Sanity check:  if si.file is NULL we do nothing
+		if (si.file) {
+			xo_emit("{P:/%*s}{:sample_count/%zu} {:sample_address/%p}",
+				indent -1, "",
+				level->count,
+				si.addr);
+			xo_emit(" ({:filename/%s} + {:offset/%llu})",
+				si.file->pathname, (unsigned long long)si.file_offset);
+#if 0
+			// Not sure I need this, since pathname gets the mapped entry
+			xo_emit("{V:file_offset/%llu}{V:file_base/%p}{V:file_len/%zu}",
+				(long long)si.file->offset, si.file->base, si.file->len);
+#endif
+			if (si.symbol) {
+				xo_emit(" [{:symbol_name/%s} + {:symbol_offset}]",
+					si.symbol, (unsigned long long)si.symbol_offset);
+				free(si.symbol);
+			}
+			xo_emit("\n");
+		}
 	}
+	xo_open_list("stacks");
 	for (indx = 0;
 	     indx < level->numChildren;
 	     indx++) {
 		Node_t *cur = &level->children[indx];
 		PrintTree(cur, indent+1);
 	}
+	xo_close_list("stacks");
+	xo_close_instance("stacks");
 }
 
 #if 0

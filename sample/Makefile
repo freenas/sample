@@ -18,7 +18,7 @@ CFLAGS+=	-DBFD=1
 .endif
 LDFLAGS+=	-L${LOCALLIB}
 
-LDADD=	-static -lBlocksRuntime -lkvm -lutil
+LDADD=	-static -lBlocksRuntime -lkvm -lxo -lutil
 
 .if defined(USE_BFD) && ${USE_BFD} == "YES"
 LDADD+=	-lbfd -liberty -lz

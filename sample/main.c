@@ -16,6 +16,8 @@
 #include <sys/wait.h>
 #include <machine/reg.h>
 
+#include <libxo/xo.h>
+
 #include "Hash.h"
 #include "Proc.h"
 #include "Thread.h"
@@ -164,6 +166,33 @@ open_device(void)
 	return retval;
 }
 
+static void
+PrintVersion(void)
+{
+	static const char *kVersionFile = "/etc/version";
+	char version[1024];
+	char arch[1024];
+	int fd;
+	int kr;
+	size_t len;
+	
+	// {Free,True}NAS have a /etc/version file.
+	// All others go via sysctl.
+	if ((fd = open(kVersionFile, O_RDONLY)) != -1) {
+		(void)read(fd, version, sizeof(version));
+		close(fd);
+	} else {
+		len = sizeof(version);
+		kr = sysctlbyname("kern.osrelease", version, &len, NULL, 0);
+	}
+	// Now the architecture
+	len = sizeof(arch);
+	kr = sysctlbyname("hw.machine_arch", arch, &len, NULL, 0);
+	xo_emit("{L,colon:Version} {:version/%s}\n", version);
+	xo_emit("{L,colon:Architecture} {:architecture/%s}\n", arch);
+	return;
+}
+
 int
 main(int ac, char **av)
 {
@@ -183,6 +212,10 @@ main(int ac, char **av)
 	static const int kSampleBufferSize = 1024 * 1024;
 	int symbolicate = 0;
 
+	i = xo_parse_args(ac, av);
+	if (i != -1)
+		ac = i;
+	
 	while ((i = getopt(ac, av, "n:s:p:dvS")) != -1) {
 		switch (i) {
 		case 'S':
@@ -300,12 +333,22 @@ main(int ac, char **av)
 
 	free(sample_buffer);
 
+	xo_open_container("sample-information");
+
+	PrintVersion();
+	xo_emit("\n\n");
+	
 	SymbolPool_t kernelPool = CreateSymbolPool();
 	// This is ugly
 	char *kld_info = NULL;
         if (kernelPool) {
                 int mod_id = 0;
-		asprintf(&kld_info, "Kernel Modules\n%10s\t%20s\t%10s\t%s\n", "Index", "Address", "Size", "Filename");
+
+		xo_emit("{T:/%s}\n", "Kernel Modules");
+		xo_emit("{T:/%10s} {T:/%20s} {T:/%10s} {T:/%s}\n",
+			"Index", "Address", "Size", "Filename");
+
+		xo_open_list("kmod-entries");
                 while ((mod_id = kldnext(mod_id)) > 0) {
                         struct kld_file_stat mod_stat = { .version = sizeof(mod_stat) };
                         if (kldstat(mod_id, &mod_stat) != -1) {
@@ -322,23 +365,32 @@ main(int ac, char **av)
 						SymbolFileSetReloc(f);
 					}
                                         (void)AddSymbolFile(kernelPool, f);
-					asprintf(&kld_info, "%s%10d\t%20p\t%10zd\t%s\n",
-						 kld_info,
-						 mod_id, mod_stat.address, mod_stat.size,
-						 mod_stat.pathname);
+					
+					xo_open_instance("kmod-entry");
+					xo_emit("{:module_id/%10d} {:module_address/%20p} {:module_size/%10zd} {:module_path/%s}\n",
+						mod_id, mod_stat.address, mod_stat.size,
+						mod_stat.pathname);
+					xo_close_instance("kmod-entry");
                                         ReleaseSymbolFile(f);
                                 }
                         } else {
                                 warn("Could not stat kernel mod_id %d", mod_id);
                         }
                 }
-		printf("\n");
+		xo_close_list("kmod-entries");
         }
 
+	xo_open_container("sample-processes");
+	xo_open_list("sample-process");
 	IterateHash(ProcHash, ^(void *object) {
 			SampleProc_t *proc = object;
 			size_t vmIndex = 0;
-			printf("Process %d (%s, pathname %s):\n%zu samples\n", proc->pid, proc->name, proc->pathname ? proc->pathname : "unknown", proc->num_samples);
+			xo_open_instance("sample-process");
+			xo_emit("{L:Process} {:process_id/%u} ({:process_name/%s}{L:, pathname}{:process_path/%s})\n",
+				proc->pid, proc->name, proc->pathname);
+			xo_emit("{L:Samples} {:sample_count/%zu}\n", proc->num_samples);
+//			printf("Process %d (%s, pathname %s):\n%zu samples\n", proc->pid, proc->name, proc->pathname ? proc->pathname : "unknown", proc->num_samples);
+			xo_open_list("threads");
 			IterateHash(proc->threads, ^(void *inner) {
 					SampleThread_t *thread = inner;
 					SymbolPool_t pool;
@@ -372,9 +424,11 @@ main(int ac, char **av)
 //						DumpSymbolPool(pool);
 					}
 
+					xo_open_instance("thread");
+					xo_emit("{L:Thread ID} {:thread-id/%u}\n", thread->tid);
 					if (thread->numStacks > 0) {
 						Node_t *root;
-						printf("\nThread ID %u\n", thread->tid);
+
 						root = CreateTree(^(void *val) {
 								return (void*)val;
 							}, ^(void *left, void *right) {
@@ -390,21 +444,22 @@ main(int ac, char **av)
 							}, ^(void *val) {
 								return;
 							}, ^(void *val) {
-								char *retval;
+								SampleInstance_t retval = { 0 };
 								off_t off;
 								SymbolFile_t *sf = NULL;
-								asprintf(&retval, "%p", val);
+								retval.addr = val;
 								if (pool) {
 									sf = FindSymbolFileByAddress(pool, val, &off);
 									if (sf) {
-										asprintf(&retval, "%s (%s + %#llx)", retval, sf->pathname, (long long)off);
+										retval.file = sf;
+										retval.file_offset = off;
 									}
 									if (symbolicate) {
 										char *tmp;
 										tmp = FindSymbolForAddress(pool, val, &off);
 										if (tmp) {
-											asprintf(&retval, "%s (%s + %#llx)", retval, tmp, (long long)off);
-											free(tmp);
+											retval.symbol = tmp;
+											retval.symbol_offset = off;
 										}
 									}
 								}
@@ -427,33 +482,44 @@ main(int ac, char **av)
 									level = NodeAddValue(level, trace);
 								}
 							}
+							xo_open_list("stacks");
 							PrintTree(root, 0);
+							xo_close_list("stacks");
 						}
 					}
+					xo_close_instance("thread");
 					return 1;
 				});
+			xo_close_list("threads");
 			if (proc->num_vmaps > 0) {
 				struct kinfo_vmentry *vme = proc->mmaps;
-				printf("\nMapped Files:\n");
-				printf("\tStart\tEnd\tFile\n");
+				xo_emit("{L,colon:Mapped Files}\n");
+				xo_emit("{T:/%15s} {T:/%15s} {T:/%10s}\n",
+					"Start", "End", "File");
+				xo_open_list("mapped-file");
 				for (vmIndex = 0;
 				     vmIndex < proc->num_vmaps;
 				     vmIndex++) {
 					if (vme[vmIndex].kve_vn_fileid) {
-						printf("\t%#llx\t%#llx\t%s\n",
-						       (long long)vme[vmIndex].kve_start,
-						       (long long)vme[vmIndex].kve_end,
-						       vme[vmIndex].kve_path);
+						xo_open_instance("mapped-file");
+						xo_emit("{:address/%15p} {:end/%15p} {:path/%s}\n",
+							(void*)vme[vmIndex].kve_start,
+							(void*)vme[vmIndex].kve_end,
+							vme[vmIndex].kve_path);
+						xo_close_instance("mapped-file");
 					}
 				}
+				xo_close_list("mapped-file");
 			}
-			printf("\n");
+			xo_emit("\n");
+			xo_close_instance("sample-process");
 			return 1;
 		});
 	DestroyHash(ProcHash);
 
-	if (kld_info)
-		printf("%s", kld_info);
+	xo_close_list("sample-process");
+	xo_close_container("sample-information");
+	xo_finish();
 	
 	return 0;
 }
