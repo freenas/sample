@@ -268,7 +268,7 @@ class Symbols(object):
         try:
             indx = bisect.bisect_right(addrs, addr)
             if indx > 0: indx -= 1
-            return self._symbols[addrs[indx]]
+            return { "Address" : addrs[indx], "Symbol" : self._symbols[addrs[indx]] }
         except:
             return None
         
@@ -321,10 +321,12 @@ def PrintStack(sample, indent = 1, symbols = None):
                                               sample[SAMPLE_FILE_KEY],
                                               sample[SAMPLE_OFFSET_KEY])
             if symbols:
-                sym = symbols.FindSymbolForAddress(addr)
-                if sym:
-                    offset = addr - sym["Base"]
-                    line += " [%s + %u]" % (sym["Name"], offset)
+                sdict = symbols.FindSymbolForAddress(addr)
+                if sdict:
+                    sym = sdict["Symbol"]
+                    base = sdict["Address"]
+                    offset = addr - base
+                    line += " [%s:%s + %d]" % (sample[SAMPLE_FILE_KEY], sym["Name"], offset)
             print line
         except KeyError:
             pass
@@ -478,36 +480,3 @@ for proc in processes:
         
     symbols = None
     
-print "Done!"
-"""
-regex = re.compile("^\s+\d+ 0x[0-9a-f]+ \((\S+) \+ (0x[0-9a-f]+)\)")
-for line in sample_file:
-
-    line = line.rstrip()
-    if line.startswith("Version: "):
-        version = line.split()[1]
-        if root_dir:
-            if os.path.isdir(os.path.join(root_dir, version)):
-                root_dir = os.path.join(root_dir, version)
-            else:
-                root_dir = None
-        continue
-
-    # Now we look for the regexp
-    result = regex.match(line)
-    symbol = None
-    if result:
-        (f, a) = result.group(1, 2)
-        if not f in files:
-            files[f] = SymbolsFromFile(f, root_dir)
-        tdict = FindNearestSymbol(files[f], int(a, 0))
-        if tdict:
-            symbol = " [%s + %d]" % (tdict["Symbol"], tdict["Offset"])
-
-    sys.stdout.write(line)
-    if symbol:
-        sys.stdout.write(symbol)
-    sys.stdout.write("\n")
-
-    
-"""
