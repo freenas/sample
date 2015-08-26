@@ -1,4 +1,4 @@
-SUBDIR=	driver test sample
+SUBDIR=	driver test sample symbolicate
 
 .include <bsd.subdir.mk>
 

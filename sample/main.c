@@ -24,6 +24,7 @@
 #include "Stack.h"
 #include "Tree.h"
 #include "Symbol.h"
+#include "Keys.h"
 
 #include "sample.h"
 
@@ -188,8 +189,8 @@ PrintVersion(void)
 	// Now the architecture
 	len = sizeof(arch);
 	kr = sysctlbyname("hw.machine_arch", arch, &len, NULL, 0);
-	xo_emit("{L,colon:Version} {:version/%s}\n", version);
-	xo_emit("{L,colon:Architecture} {:architecture/%s}\n", arch);
+	xo_emit("{L,colon:Version} {:" VERSION_KEY "/%s}\n", version);
+	xo_emit("{L,colon:Architecture} {:" ARCH_KEY "/%s}\n", arch);
 	return;
 }
 
@@ -333,7 +334,7 @@ main(int ac, char **av)
 
 	free(sample_buffer);
 
-	xo_open_container("sample-information");
+	xo_open_container(TOP_KEY);
 
 	PrintVersion();
 	xo_emit("\n\n");
@@ -348,7 +349,7 @@ main(int ac, char **av)
 		xo_emit("{T:/%10s} {T:/%20s} {T:/%10s} {T:/%s}\n",
 			"Index", "Address", "Size", "Filename");
 
-		xo_open_list("kmod-entries");
+		xo_open_list(KMOD_LIST);
                 while ((mod_id = kldnext(mod_id)) > 0) {
                         struct kld_file_stat mod_stat = { .version = sizeof(mod_stat) };
                         if (kldstat(mod_id, &mod_stat) != -1) {
@@ -366,31 +367,36 @@ main(int ac, char **av)
 					}
                                         (void)AddSymbolFile(kernelPool, f);
 					
-					xo_open_instance("kmod-entry");
-					xo_emit("{:module_id/%10d} {:module_address/%20p} {:module_size/%10zd} {:module_path/%s}\n",
+					xo_open_instance(KMOD_ENTRY);
+					xo_emit("{:" KMODULE_ID "/%10d} "
+						"{V,quotes:" KMODULE_ADDR "/%20p} "
+						"{:" KMODULE_SIZE "/%10zd} "
+						"{:" KMODULE_PATH "/%s}\n",
 						mod_id, mod_stat.address, mod_stat.size,
 						mod_stat.pathname);
-					xo_close_instance("kmod-entry");
+					xo_close_instance(KMOD_ENTRY);
                                         ReleaseSymbolFile(f);
                                 }
                         } else {
                                 warn("Could not stat kernel mod_id %d", mod_id);
                         }
                 }
-		xo_close_list("kmod-entries");
+		xo_close_list(KMOD_LIST);
         }
 
-	xo_open_container("sample-processes");
-	xo_open_list("sample-process");
+	xo_open_list(PROCESS_LIST);
 	IterateHash(ProcHash, ^(void *object) {
 			SampleProc_t *proc = object;
 			size_t vmIndex = 0;
-			xo_open_instance("sample-process");
-			xo_emit("{L:Process} {:process_id/%u} ({:process_name/%s}{L:, pathname}{:process_path/%s})\n",
+			xo_open_instance(PROCESS_LIST);
+			xo_open_container(PROCESS_KEY);
+			xo_emit("{L:Process} {:" PROC_PID_KEY "/%u} "
+				"({:" PROC_NAME_KEY "/%s}"
+				"{L:, pathname}{:" PROC_PATH_KEY "/%s})\n",
 				proc->pid, proc->name, proc->pathname);
 			xo_emit("{L:Samples} {:sample_count/%zu}\n", proc->num_samples);
 //			printf("Process %d (%s, pathname %s):\n%zu samples\n", proc->pid, proc->name, proc->pathname ? proc->pathname : "unknown", proc->num_samples);
-			xo_open_list("threads");
+			xo_open_list(THREAD_LIST);
 			IterateHash(proc->threads, ^(void *inner) {
 					SampleThread_t *thread = inner;
 					SymbolPool_t pool;
@@ -424,8 +430,8 @@ main(int ac, char **av)
 //						DumpSymbolPool(pool);
 					}
 
-					xo_open_instance("thread");
-					xo_emit("{L:Thread ID} {:thread-id/%u}\n", thread->tid);
+					xo_open_instance(THREAD_KEY);
+					xo_emit("{L:Thread ID} {:" THREAD_ID_KEY "/%u}\n", thread->tid);
 					if (thread->numStacks > 0) {
 						Node_t *root;
 
@@ -482,43 +488,53 @@ main(int ac, char **av)
 									level = NodeAddValue(level, trace);
 								}
 							}
-							xo_open_list("stacks");
+							xo_open_list(STACKS_LIST);
+							xo_open_instance(STACKS_LIST);
 							PrintTree(root, 0);
-							xo_close_list("stacks");
+							xo_close_instance(STACKS_LIST);
+							xo_close_list(STACKS_LIST);
 						}
 					}
-					xo_close_instance("thread");
+					xo_close_instance(THREAD_KEY);
 					return 1;
 				});
-			xo_close_list("threads");
+			xo_close_list(THREAD_LIST);
 			if (proc->num_vmaps > 0) {
 				struct kinfo_vmentry *vme = proc->mmaps;
 				xo_emit("{L,colon:Mapped Files}\n");
-				xo_emit("{T:/%15s} {T:/%15s} {T:/%10s}\n",
-					"Start", "End", "File");
-				xo_open_list("mapped-file");
+				xo_emit("{T:/%15s} {T:/%15s} {T:/%24s} {T:/%10s}\n",
+					"Start", "End", "Offset", "File");
+				xo_open_list(FILE_LIST);
 				for (vmIndex = 0;
 				     vmIndex < proc->num_vmaps;
 				     vmIndex++) {
 					if (vme[vmIndex].kve_vn_fileid) {
-						xo_open_instance("mapped-file");
-						xo_emit("{:address/%15p} {:end/%15p} {:path/%s}\n",
-							(void*)vme[vmIndex].kve_start,
-							(void*)vme[vmIndex].kve_end,
-							vme[vmIndex].kve_path);
-						xo_close_instance("mapped-file");
+
+						if (vme[vmIndex].kve_flags & KVME_PROT_EXEC) {
+							xo_open_instance(FILE_LIST);
+							xo_emit("{V,quotes:address/%15p} {V,quotes:end/%15p} {V:offset/%24llu} {:path/%s}\n",
+								(void*)vme[vmIndex].kve_start,
+								(void*)vme[vmIndex].kve_end,
+								(long long)vme[vmIndex].kve_offset,
+								vme[vmIndex].kve_path);
+							fprintf(stderr, "%s@%p:  flags = %#x\n",
+								vme[vmIndex].kve_path,
+								(void*)vme[vmIndex].kve_start,
+								vme[vmIndex].kve_flags);
+							xo_close_instance(FILE_LIST);
+						}
 					}
 				}
-				xo_close_list("mapped-file");
+				xo_close_list(FILE_LIST);
 			}
 			xo_emit("\n");
-			xo_close_instance("sample-process");
+			xo_close_container(PROCESS_KEY);
+			xo_close_instance(PROCESS_LIST);
 			return 1;
 		});
 	DestroyHash(ProcHash);
 
-	xo_close_list("sample-process");
-	xo_close_container("sample-information");
+	xo_close_container(TOP_KEY);
 	xo_finish();
 	
 	return 0;

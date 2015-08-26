@@ -9,6 +9,7 @@
 
 #include "Symbol.h"
 #include "Tree.h"
+#include "Keys.h"
 
 typedef struct TreeHelpers {
 	int	(^compare)(void *left, void *right);	// Standard compare, a la memcmp
@@ -109,40 +110,54 @@ PrintTree(Node_t *level, int indent)
 	size_t indx;
 	TreeHelpers_t *helpers = level->helpers;
 
-	xo_open_instance("stacks");
+#if 0
+	if (level->value == NULL ||
+	    level->numChildren == 0)
+		return;
+#endif
+	
 	if (level->value) {
 		SampleInstance_t si = helpers->instance(level->value);
 		
 		// Sanity check:  if si.file is NULL we do nothing
 		if (si.file) {
-			xo_emit("{P:/%*s}{:sample_count/%zu} {:sample_address/%p}",
+			char *fmt;
+
+			xo_emit("{P:/%*s}{:" SAMPLE_COUNT_KEY "/%zu} "
+				"{V,quotes:" SAMPLE_ADDR_KEY "/%p}",
 				indent -1, "",
 				level->count,
 				si.addr);
-			xo_emit(" ({:filename/%s} + {:offset/%llu})",
+			xo_emit(" ({:" SAMPLE_FILE_KEY "/%s} + "
+				"{:" SAMPLE_OFFSET_KEY "/%llu})",
 				si.file->pathname, (unsigned long long)si.file_offset);
 #if 0
 			// Not sure I need this, since pathname gets the mapped entry
-			xo_emit("{V:file_offset/%llu}{V:file_base/%p}{V:file_len/%zu}",
+			xo_emit("{V:file_offset/%llu}{V,quotes:file_base/%p}{V:file_len/%zu}",
 				(long long)si.file->offset, si.file->base, si.file->len);
 #endif
 			if (si.symbol) {
-				xo_emit(" [{:symbol_name/%s} + {:symbol_offset}]",
+				xo_emit(" [{:" SAMPLE_SYMBOL_KEY "/%s} + "
+					"{:" SAMPLE_SYMOFF_KEY "/%llu}]",
 					si.symbol, (unsigned long long)si.symbol_offset);
 				free(si.symbol);
 			}
 			xo_emit("\n");
 		}
 	}
-	xo_open_list("stacks");
-	for (indx = 0;
-	     indx < level->numChildren;
-	     indx++) {
-		Node_t *cur = &level->children[indx];
-		PrintTree(cur, indent+1);
+	if (level->numChildren) {
+		xo_open_list(STACKS_LIST);
+		xo_open_instance(STACKS_LIST);
+		for (indx = 0;
+		     indx < level->numChildren;
+		     indx++) {
+			Node_t *cur = &level->children[indx];
+			PrintTree(cur, indent+1);
+		}
+		xo_close_instance(STACKS_LIST);
+		xo_close_list(STACKS_LIST);
 	}
-	xo_close_list("stacks");
-	xo_close_instance("stacks");
+	return;
 }
 
 #if 0
