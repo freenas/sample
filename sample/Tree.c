@@ -116,6 +116,7 @@ PrintTree(Node_t *level, int indent)
 		return;
 #endif
 	
+	xo_open_container("sample-instance");
 	if (level->value) {
 		SampleInstance_t si = helpers->instance(level->value);
 		
@@ -147,16 +148,17 @@ PrintTree(Node_t *level, int indent)
 	}
 	if (level->numChildren) {
 		xo_open_list(STACKS_LIST);
-		xo_open_instance(STACKS_LIST);
 		for (indx = 0;
 		     indx < level->numChildren;
 		     indx++) {
 			Node_t *cur = &level->children[indx];
+			xo_open_instance(STACKS_LIST);
 			PrintTree(cur, indent+1);
+			xo_close_instance(STACKS_LIST);
 		}
-		xo_close_instance(STACKS_LIST);
 		xo_close_list(STACKS_LIST);
 	}
+	xo_close_container("sample-instance");
 	return;
 }
 

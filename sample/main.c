@@ -488,11 +488,7 @@ main(int ac, char **av)
 									level = NodeAddValue(level, trace);
 								}
 							}
-							xo_open_list(STACKS_LIST);
-							xo_open_instance(STACKS_LIST);
 							PrintTree(root, 0);
-							xo_close_instance(STACKS_LIST);
-							xo_close_list(STACKS_LIST);
 						}
 					}
 					xo_close_instance(THREAD_KEY);

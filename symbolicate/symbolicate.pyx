@@ -307,39 +307,43 @@ def LoadProcesses(sample_dict):
 
     return retval
 
-def PrintStack(sample, indent = 1, symbols = None):
+def PrintStack(instance, indent = 1, symbols = None):
     """
     Print stacks.  This is recursive.
+    A stack sample consists of a "sample-instance" container.
+    The caller has extracted this container, and we have the key.
+    This container may have an array named "stacks" in it;
+    it may also have data for this specific sample.
     """
     import traceback
-    if type(sample) == dict:
-        try:
-            addr = int(sample[SAMPLE_ADDR_KEY], 0)
-            line = "%s %5d %#x (%s + %#x)" % (" " * (indent - 1),
-                                              sample[SAMPLE_COUNT_KEY],
-                                              addr,
-                                              sample[SAMPLE_FILE_KEY],
-                                              sample[SAMPLE_OFFSET_KEY])
-            if symbols:
-                sdict = symbols.FindSymbolForAddress(addr)
-                if sdict:
-                    sym = sdict["Symbol"]
-                    base = sdict["Address"]
-                    offset = addr - base
-                    line += " [%s:%s + %d]" % (sample[SAMPLE_FILE_KEY], sym["Name"], offset)
-            print line
-        except KeyError:
-            pass
-        except BaseException as e:
-            print >> sys.stderr, traceback.format_exc()
 
-        try:
-            PrintStack(sample[THREAD_STACKS_KEY], indent + 1, symbols)
-        except:
-            pass
-    elif type(sample) == list:
-        for stack in sample:
-            PrintStack(stack, indent, symbols)
+    try:
+        addr = int(instance[SAMPLE_ADDR_KEY], 0)
+        line = "%s %5d %#x (%s + %#x)" % (" " * (indent - 1),
+                                          instance[SAMPLE_COUNT_KEY],
+                                          addr,
+                                          instance[SAMPLE_FILE_KEY],
+                                          instance[SAMPLE_OFFSET_KEY])
+        if symbols:
+            sdict = symbols.FindSymbolForAddress(addr)
+            if sdict:
+                sym = sdict["Symbol"]
+                base = sdict["Address"]
+                offset = addr - base
+                line += " [%s:%s + %d]" % (instance[SAMPLE_FILE_KEY], sym["Name"], offset)
+        print line
+    except KeyError:
+        pass
+    except BaseException as e:
+        print >> sys.stderr, traceback.format_exc()
+
+    if THREAD_STACKS_KEY in instance:
+        for c in instance[THREAD_STACKS_KEY]:
+            child = c["sample-instance"]
+            try:
+                PrintStack(child, indent + 1, symbols)
+            except:
+                pass
     return
 
 files = {}
@@ -415,6 +419,9 @@ for proc in processes:
     print "Samples:  %u" % proc[PROC_COUNT_KEY]
     print ""
 
+    if proc[PROC_NAME_KEY] != "sample":
+        continue
+    
     symbols = Symbols()
     for kmod in kmods.itervalues():
         symbols.AddSymbolFile(kmod)
@@ -463,9 +470,8 @@ for proc in processes:
             print "Thread ID %u" % thread[THREAD_ID_KEY]
             print ""
 
-            stacks = thread[THREAD_STACKS_KEY]
-            for stack in stacks:
-                PrintStack(stack, indent = 1, symbols = symbols)
+            if "sample-instance" in thread:
+                PrintStack(thread["sample-instance"], indent = 1, symbols = symbols)
             if Debug: symbols.DumpSymbols()
     except BaseException as e:
         print >> sys.stderr, "e = %s" % str(e)
