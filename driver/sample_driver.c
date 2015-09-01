@@ -13,6 +13,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/systm.h>
 #include <sys/uio.h>
 #include <sys/fcntl.h>
+#include <sys/taskqueue.h>
 
 #include <sys/user.h>
 #include <sys/proc.h>
@@ -33,6 +34,7 @@ typedef struct {
         struct timeval next_time;
         struct timeval sample_ms;      // Milliseconds between samples
         struct callout  sample_callout;
+	struct timeout_task	sample_task;	// Like the callout, but for taskqueue
         void    *temp_buffer;   // Staging area to get a sample's stacks.
         uint32_t        num_dropped;
         kern_sample_t   *head;
@@ -306,7 +308,7 @@ sample_cpu_handler(void *arg)
  * Unlike the per-cpu one, it will get many sets of samples.
  */
 static void
-sample_sleeping_handler(void *arg)
+sample_sleeping_task(void *arg, int pending)
 {
 	kern_sample_set_t *ctx = arg;
 	struct proc *p;
@@ -361,7 +363,9 @@ sample_sleeping_handler(void *arg)
 //	printf("sleeping sample count %u\n", ctx->sample_count);
 	if (ctx->sample_count-- > 1) {
 		int ticks_ms = tvtohz(&ctx->sample_ms);
-		callout_reset(&ctx->sample_callout, ticks_ms, sample_sleeping_handler, ctx);
+		taskqueue_enqueue_timeout(taskqueue_thread,
+					  &ctx->sample_task,
+					  ticks_ms);
 	}
 	mtx_unlock_spin(&ctx->sample_spin);
 	return;
@@ -383,7 +387,14 @@ release_sample_data(void)
 #if SAMPLE_DEBUG
 			uprintf("%s(%d):  Calling callout_drain now\n", __FUNCTION__, __LINE__);
 #endif
-                        callout_drain(&cur_set->sample_callout);
+			mtx_lock_spin(&cur_set->sample_spin);
+			cur_set->sample_count = 0;
+			mtx_unlock_spin(&cur_set->sample_spin);
+			if (cpu_index < kern_samples->s_ncpu - 1)
+				callout_drain(&cur_set->sample_callout);
+			else
+				taskqueue_drain_timeout(taskqueue_thread, &cur_set->sample_task);
+			
 			mtx_destroy(&cur_set->sample_spin);
 			if (cur_set->temp_buffer)
 				free(cur_set->temp_buffer, M_SAMPLE);
@@ -541,7 +552,16 @@ sample_ioctl(struct cdev *dev,
 #endif
 				} else {
 					int ticks_ms = tvtohz(&sample_ms);
-					callout_reset(&cur_set->sample_callout, ticks_ms, sample_sleeping_handler, cur_set);
+					
+					TIMEOUT_TASK_INIT(taskqueue_thread,
+							  &cur_set->sample_task,
+							  1,
+							  sample_sleeping_task,
+							  cur_set);
+					taskqueue_enqueue_timeout(taskqueue_thread,
+								  &cur_set->sample_task,
+								  ticks_ms);
+//					callout_reset(&cur_set->sample_callout, ticks_ms, sample_sleeping_handler, cur_set);
 				}
 			}
 		} else {
