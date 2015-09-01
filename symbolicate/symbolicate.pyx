@@ -11,6 +11,8 @@ import os, sys
 import types
 import getopt
 import re
+from libc.errno cimport errno
+from libc.string cimport strerror
 
 Debug = False
 Profile = None
@@ -70,7 +72,13 @@ cdef extern from "bfd.h":
     asymbol *bfd_make_empty_symbol(const bfd *abfd)
     asymbol *bfd_minisymbol_to_symbol(const bfd *abfd, int dynamic, void *sym, asymbol *symbol)
     
+    int bfd_get_error()
+    
     # Picking and choosing the ones I use
+    enum:
+        bfd_error_no_memory
+        bfd_error_invalid_target
+        bfd_error_system_call
     enum:
         bfd_object
     enum:
@@ -93,20 +101,24 @@ def SymbolsFromFile(path, root_dir = None, base_addr = 0):
     cdef int symcount
     cdef asymbol **syms = NULL
     cdef unsigned int size
-
+    
     if root_dir:
         tpath = root_dir + "/" + path
     else:
         tpath = path
         
     b = bfd_openr(path, NULL)
-    if b == NULL:
-        raise Exception("Cannot open file %s" % tpath)
-    if bfd_check_format(b, bfd_object) == 0:
-        raise Exception("Unknown objet type for kernel")
+    if b == NULL or bfd_check_format(b, bfd_object) == 0:
+        if bfd_get_error() == bfd_error_no_memory:
+            raise MemoryError("Unable to allocate memory")
+        elif bfd_get_error() == bfd_error_invalid_target:
+            raise ValueError("Unknown file type for %s" % path)
+        elif bfd_get_error() == bfd_error_system_call:
+            raise OSError(errno, "%s: %s" % (path, strerror(errno)))
+        else:
+            raise Exception("Unexpected BFD error %d" % bfd_get_error())
 
     symcount = 0
-
     dynamic = 0
 
     if (bfd_get_file_flags(b) & HAS_SYMS) == 0:
@@ -271,12 +283,9 @@ class Symbols(object):
             self._sorted = True
             
         addrs = self._addresses
-        try:
-            indx = bisect.bisect_right(addrs, addr)
-            if indx > 0: indx -= 1
-            return { "Address" : addrs[indx], "Symbol" : self._symbols[addrs[indx]] }
-        except:
-            return None
+        indx = bisect.bisect_right(addrs, addr)
+        if indx > 0: indx -= 1
+        return { "Address" : addrs[indx], "Symbol" : self._symbols[addrs[indx]] }
         
 def LoadKernelModules(sample_dict, root_dir = "/"):
     retval = {}
@@ -292,7 +301,7 @@ def LoadKernelModules(sample_dict, root_dir = "/"):
                                    force_dynamic = real_path.endswith(".ko"),
             )
             retval[kmod[KMODULE_PATH]] = kmod_file
-    except BaseException as e:
+    except KeyError as e:
         print >> sys.stderr, "No kmodules?  That seems unlikely"
         print >> sys.stderr, "root_dir = %s, real_path = %s" % (root_dir, real_path)
         print >> sys.stderr "%s" % str(e)
@@ -306,7 +315,7 @@ def LoadProcesses(sample_dict):
             p = process[PROCESS_KEY]
             # _Now_ we've got a process object
             retval.append(p)
-    except BaseException as e:
+    except KeyError as e:
         print >> sys.stderr, "What?  How did we get an exception processing processes?"
         print >> sys.stderr, str(e)
 
@@ -340,16 +349,11 @@ def PrintStack(instance, indent = 1, symbols = None):
         print line
     except KeyError:
         pass
-    except BaseException as e:
-        print >> sys.stderr, traceback.format_exc()
 
     if THREAD_STACKS_KEY in instance:
         for c in instance[THREAD_STACKS_KEY]:
             child = c["sample-instance"]
-            try:
-                PrintStack(child, indent + 1, symbols)
-            except:
-                pass
+            PrintStack(child, indent + 1, symbols)
     return
 
 files = {}
@@ -470,7 +474,9 @@ for proc in processes:
                             force_dynamic = ".so" in real_path,
             )
             symbols.AddSymbolFile(sf)
-    except BaseException as e:
+    except KeyError as e:
+        pass
+    except OSError as e:
         if real_path:
             print >> sys.stderr, "Unable to add mapped file %s: %s" % (real_path, str(e))
             
@@ -483,8 +489,7 @@ for proc in processes:
             if "sample-instance" in thread:
                 PrintStack(thread["sample-instance"], indent = 1, symbols = symbols)
             if Debug: symbols.DumpSymbols()
-    except BaseException as e:
-        print >> sys.stderr, "e = %s" % str(e)
+    except KeyError as e:
         threads = None
 
     if mapped_list:
