@@ -419,9 +419,6 @@ for proc in processes:
     print "Samples:  %u" % proc[PROC_COUNT_KEY]
     print ""
 
-    if proc[PROC_NAME_KEY] != "sample":
-        continue
-    
     symbols = Symbols()
     for kmod in kmods.itervalues():
         symbols.AddSymbolFile(kmod)
