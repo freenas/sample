@@ -1,3 +1,5 @@
+# cython: profile=True
+
 """
 Cython-based symbolicator.
 
@@ -11,6 +13,7 @@ import getopt
 import re
 
 Debug = False
+Profile = None
 
 cimport cython
 
@@ -239,14 +242,14 @@ class Symbols(object):
  
     def __init__(self):
         self._symbols = {}
-        self._keys = []
-
+        self._addresses = []
+        self._sorted = False
+        
     def DumpSymbols(self):
-        for k in self._keys:
+        for k in self._addresses:
             print "%#x %s" % (k, self._symbols[k])
             
     def AddSymbolFile(self, sf, base = None):
-        import bisect
         if base is None:
             base = sf.base
         new_symbols = sf.symbols
@@ -258,13 +261,16 @@ class Symbols(object):
                 print >> sys.stderr, "File %s:  Duplicate address %#x for symbol %s -- %s was here first" % (sf.path, addr, sym["Name"], self._symbols[addr])
             else:
                 self._symbols[addr] = sym
-                ndx = bisect.bisect_right(self._keys, addr)
-                self._keys.insert(ndx, addr)
-#        self._keys = sorted(self._symbols.keys())
+                self._sorted = False
+
         
     def FindSymbolForAddress(self, addr):
         import bisect
-        addrs = self._keys
+        if self._sorted is False:
+            self._addresses = sorted(self._symbols.keys())
+            self._sorted = True
+            
+        addrs = self._addresses
         try:
             indx = bisect.bisect_right(addrs, addr)
             if indx > 0: indx -= 1
@@ -348,9 +354,10 @@ def PrintStack(instance, indent = 1, symbols = None):
 
 files = {}
 
-short_opts = "R:D"
+short_opts = "R:DP"
 long_opts = [ "root=",
               "debug",
+	      "profile",
               ]
 root_dir = None
 
@@ -364,6 +371,9 @@ for o, a in opts:
         root_dir = a
     elif o in ("-D", "--debug"):
         Debug = True
+    elif o in ("-P", "--profile"):
+        import cProfile
+        Profile = cProfile.Profile()
     else:
         print >> sys.stderr, "Unknown option %s" % o
         usage()
@@ -395,6 +405,9 @@ else:
         root_dir = root_dir + "/" + version
     elif not os.path.isdir(root_dir):
         root_dir = "/"
+    
+if Profile:
+    Profile.enable()
     
 kmods = LoadKernelModules(sample, root_dir)
 if Debug:
@@ -482,4 +495,10 @@ for proc in processes:
         print ""
         
     symbols = None
+    
+if Profile:
+    Profile.disable()
+    import pstats
+    s = pstats.Stats(Profile, stream = sys.stderr).sort_stats("cumulative")
+    s.print_stats()
     
