@@ -349,8 +349,8 @@ def PrintStack(instance, indent = 1, symbols = None):
 files = {}
 
 short_opts = "R:D"
-long_opts = [ "--root=",
-              "--debug",
+long_opts = [ "root=",
+              "debug",
               ]
 root_dir = None
 
