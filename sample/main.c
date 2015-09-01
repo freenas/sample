@@ -259,7 +259,8 @@ main(int ac, char **av)
 		}
 		sample_names = av;
 		num_sample_names = ac;
-		fprintf(stderr, "num_sample_names = %zd\n", num_sample_names);
+		if (debug)
+			fprintf(stderr, "num_sample_names = %zd\n", num_sample_names);
 	}
 	
 	// Some sanity checking now
@@ -280,7 +281,8 @@ main(int ac, char **av)
 	opts.flags = SAMPLE_ALLPROCS;
 	opts.milliseconds = sample_duration;
 	opts.count = sample_count;
-	fprintf(stderr, "opts.count = %d\n", opts.count);
+	if (debug)
+		fprintf(stderr, "opts.count = %d\n", opts.count);
 	
 	if (ioctl(sample_fd, KSIOC_START, &opts) == -1) {
 		err(1, "Could not start sampling");
@@ -513,10 +515,11 @@ main(int ac, char **av)
 								(void*)vme[vmIndex].kve_end,
 								(long long)vme[vmIndex].kve_offset,
 								vme[vmIndex].kve_path);
-							fprintf(stderr, "%s@%p:  flags = %#x\n",
-								vme[vmIndex].kve_path,
-								(void*)vme[vmIndex].kve_start,
-								vme[vmIndex].kve_flags);
+							if (debug)
+								fprintf(stderr, "%s@%p:  flags = %#x\n",
+									vme[vmIndex].kve_path,
+									(void*)vme[vmIndex].kve_start,
+									vme[vmIndex].kve_flags);
 							xo_close_instance(FILE_LIST);
 						}
 					}
