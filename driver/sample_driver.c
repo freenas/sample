@@ -538,7 +538,7 @@ sample_ioctl(struct cdev *dev,
 				cur_set->head = cur_set->tail = cur_set->samples;
 				cur_set->sample_ms = sample_ms;
 				cur_set->sample_count = opts->count;
-				cur_set->temp_buffer = malloc(STAGING_BUFFER_SIZE, M_SAMPLE, M_WAITOK);
+				cur_set->temp_buffer = malloc(STAGING_BUFFER_SIZE, M_SAMPLE, M_WAITOK | M_ZERO);
 				callout_init(&cur_set->sample_callout, CALLOUT_MPSAFE);
 
 				if (cpu_index < (ncpus - 1)) {
@@ -624,7 +624,7 @@ start_over:
 		goto done;
 	}
 
-	temp_sample = malloc(STAGING_BUFFER_SIZE, M_TEMP, M_WAITOK);
+	temp_sample = malloc(STAGING_BUFFER_SIZE, M_TEMP, M_WAITOK | M_ZERO);
 	if (temp_sample == NULL) {
 		error = ENOMEM;
 		goto done;
