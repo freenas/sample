@@ -609,8 +609,14 @@ sample_read(struct cdev *dev, struct uio *uio, int ioflag)
 	 * and no samples currently available?
 	 */
 //	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
+	temp_sample = malloc(STAGING_BUFFER_SIZE, M_TEMP, M_WAITOK);
+	if (temp_sample == NULL) {
+		error = ENOMEM;
+		goto done;
+	}
 
 start_over:
+	bzero(temp_sample, STAGING_BUFFER_SIZE);
 	mtx_lock(&sample_lock);
 	samples_left = 0;
 //	uprintf("%s(%d)\n", __FUNCTION__, __LINE__);
@@ -624,11 +630,6 @@ start_over:
 		goto done;
 	}
 
-	temp_sample = malloc(STAGING_BUFFER_SIZE, M_TEMP, M_WAITOK | M_ZERO);
-	if (temp_sample == NULL) {
-		error = ENOMEM;
-		goto done;
-	}
 
 	/*
 	 * Cycle through the buffers, looking for data.
