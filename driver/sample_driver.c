@@ -118,9 +118,13 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
 #endif
 
         mtx_lock_spin(&sample_set->sample_spin);
+/*
+	printf("%s(%d):  sample_set:  samples = %p - %p, head = %p, tail = %p\n",
+	       __FUNCTION__, __LINE__, sample_set->samples, (uint8_t*)(sample_set->samples) + STAGING_BUFFER_SIZE,
+	       sample_set->head, sample_set->tail);
+*/
         head = (uint8_t*)sample_set->head;
         tail = (uint8_t*)sample_set->tail;
-
         if (head == tail) {
                 // No entries
                 error = ENOENT;
@@ -147,6 +151,7 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
                          * is corrupt.  I should probably indicate this somehow.
                          */
                         error = EINVAL;
+			printf("%s(%d):  Corrupt buffer?\n", __FUNCTION__, __LINE__);
                         goto done;
                 }
                 bcopy(head, buffer, sample_size);
@@ -155,6 +160,11 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
                 // It wraps, so a bit more complicated
                 size_t avail = end - head, amt;
 
+#if SAMPLE_DEBUG > 4
+		printf("%s(%d):  sample_set:  samples = %p - %p, head = %p, tail = %p\n",
+		       __FUNCTION__, __LINE__, start, end,
+		       sample_set->head, sample_set->tail);
+#endif
                 avail += tail - start;
                 if (sample_size > avail) {
                         error = EINVAL;
@@ -169,6 +179,18 @@ get_sample(kern_sample_set_t *sample_set, kern_sample_t *buffer, size_t buffer_s
                         head = start + (sample_size - amt);
                 }
         }
+	/*
+	 * If we've moved head to the end of the buffer, we now put it back
+	 * at the beginning.
+	 */
+	if (head == end)
+		head = start;
+	
+	if (head < start)
+		panic("After getting a sample, head is too small:  start = %p, end = %p, head = %p", start, end, head);
+	if (head >= end)
+		panic("After getting a sample, head has gone off the reservation:  start = %p, end = %p, head = %p", start, end, head);
+	
         sample_set->head = (void*)head;
 
 done:
