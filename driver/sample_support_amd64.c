@@ -19,6 +19,7 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_param.h>
 #include <vm/pmap.h>
 #include <vm/vm_map.h>
+#include <vm/vm_page.h>
 
 #include "sample.h"
 
@@ -163,24 +164,24 @@ static caddr_t
 GET_WORD(pmap_t map, caddr_t virtual_addr)
 {
 	caddr_t retval = 0;
-	vm_paddr_t physical_page;
-	size_t page_offset;
+	vm_page_t page;
 	int err;
 	
-	page_offset = virtual_addr - (caddr_t)trunc_page(virtual_addr);
-	physical_page = pmap_extract(map, (vm_offset_t)virtual_addr);
-#if SAMPLE_DEBUG > 1
-	printf("%s(%p, %p):  page_offset = %d, physical_page = %ld\n", __FUNCTION__, map, (void*)virtual_addr, (int)page_offset, (long)physical_page);
-#endif
-	if (physical_page == 0) {
-		return retval;
+	page = pmap_extract_and_hold(map, (vm_offset_t)virtual_addr, VM_PROT_READ);
+	if (page == 0) {
+		return 0;
 	}
+
 	if ((err = copyin(virtual_addr, &retval, sizeof(retval))) != 0) {
 #if SAMPLE_DEBUG
 		printf("%s(%d):  copyin(%p, %p, %zd)  failed: %d\n", __FUNCTION__, __LINE__, (void*)virtual_addr, &retval, sizeof(retval), err);
 #endif
-		return 0;
+		retval = 0;
 	}
+
+	vm_page_lock(page);
+	vm_page_unhold(page);
+	vm_page_unlock(page);
 	return retval;
 }
 
