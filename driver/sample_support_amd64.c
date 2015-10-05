@@ -166,13 +166,18 @@ GET_WORD(pmap_t map, caddr_t virtual_addr)
 	caddr_t retval = 0;
 	vm_page_t page;
 	int err;
+	caddr_t old_fault;
 	
 	page = pmap_extract_and_hold(map, (vm_offset_t)virtual_addr, VM_PROT_READ);
 	if (page == 0) {
 		return 0;
 	}
 
-	if ((err = copyin(virtual_addr, &retval, sizeof(retval))) != 0) {
+	// I do this because copyin/copyout aren't re-entrant.
+	old_fault = curpcb->pcb_onfault;
+	err = copyin(virtual_addr, &retval, sizeof(retval));
+	curpcb->pcb_onfault = old_fault;
+	if (err != 0) {
 #if SAMPLE_DEBUG
 		printf("%s(%d):  copyin(%p, %p, %zd)  failed: %d\n", __FUNCTION__, __LINE__, (void*)virtual_addr, &retval, sizeof(retval), err);
 #endif

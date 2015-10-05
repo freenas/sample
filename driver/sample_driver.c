@@ -283,6 +283,7 @@ sample_cpu_handler(void *arg)
                 samp->tid = curthread->td_tid;
 		samp->cpuid = PCPU_GET(cpuid);
 		samp->sample_type = SAMPLE_TYPE_RUNNING;
+		samp->num_pcs = 0;
 #if SAMPLE_DEBUG > 2
 		printf("%s(%d):  sampe = {pid %u, tid %u, cpuid %d, type %d}\n", __FUNCTION__, __LINE__, samp->pid, samp->tid, samp->cpuid, samp->sample_type);
 #endif
