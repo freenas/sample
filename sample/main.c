@@ -144,7 +144,7 @@ AddSampleInformation(SampleProc_t *proc, kern_sample_t *sample)
 static void
 usage(void)
 {
-	errx(1, "usage:  [-n sample_count] [-s sample_duration] [-p pid]\n"
+	errx(1, "usage:  [-n sample_count] [-s sample_duration] [-p pid] [-S]\n"
 	     "\tsample duration in ms (default 10)");
 }
 
